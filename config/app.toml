@@ -1,0 +1,19 @@
+[app]
+name = "Chat Robot"
+env = "dev"
+log_level = "INFO"
+api_prefix = "/api/v1"
+
+[runtime]
+mode = "mock"
+
+[database]
+host = "postgres"
+port = 5432
+name = "chat_robot"
+user = "chat_robot"
+password = "chat_robot"
+dsn = "postgresql+psycopg://chat_robot:chat_robot@postgres:5432/chat_robot"
+
+[vector_store]
+qdrant_url = "http://qdrant:6333"

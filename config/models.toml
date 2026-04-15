@@ -1,0 +1,11 @@
+[paths]
+host_model_root = "/root/models"
+llm_model_path = "/root/models/Qwen3-8B"
+intent_model_path = "/root/models/Qwen2.5-1.5B-Instruct"
+embedding_model_path = "/root/models/bge-m3"
+reranker_model_path = "/root/models/bge-reranker-v2-m3"
+
+[generation]
+llm_max_input_tokens = 8192
+llm_max_new_tokens = 512
+gpu_queue_maxsize = 100
