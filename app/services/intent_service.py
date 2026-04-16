@@ -1,9 +1,19 @@
 from typing import Protocol
 
 from app.schemas.chat import ChatMessage, IntentDecision
+from app.schemas.inference import (
+    InferenceIntentRequest,
+    InferenceIntentResponse,
+)
 
 
 class IntentService(Protocol):
+    async def start(self) -> None:
+        ...
+
+    async def stop(self) -> None:
+        ...
+
     async def decide(self, messages: list[ChatMessage]) -> IntentDecision:
         ...
 
@@ -21,6 +31,12 @@ class MockIntentService:
         "查询",
         "项目",
     )
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
 
     async def decide(self, messages: list[ChatMessage]) -> IntentDecision:
         latest_user_message = next(
@@ -46,3 +62,43 @@ class MockIntentService:
             rewrite_query=normalized,
             rationale=rationale,
         )
+
+
+class RemoteIntentService:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: float,
+        transport: object | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._timeout_seconds = timeout_seconds
+        self._transport = transport
+        self._client = None
+
+    async def start(self) -> None:
+        import httpx
+
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=self._timeout_seconds,
+            transport=self._transport,
+        )
+
+    async def stop(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    async def decide(self, messages: list[ChatMessage]) -> IntentDecision:
+        if self._client is None:
+            raise RuntimeError("RemoteIntentService has not been started.")
+
+        payload = InferenceIntentRequest(messages=messages)
+        response = await self._client.post(
+            "/intent",
+            json=payload.model_dump(mode="json"),
+        )
+        response.raise_for_status()
+        body = InferenceIntentResponse.model_validate(response.json())
+        return body.decision

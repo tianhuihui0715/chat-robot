@@ -148,6 +148,26 @@ docker compose logs -f api
 docker compose logs -f inference
 ```
 
+## Windows API only setup
+
+When the model service is already running in WSL, the Windows host can use a
+lightweight Python environment for the API service only.
+
+```powershell
+py -3.10 -m venv .venv-api
+.venv-api\Scripts\python -m pip install --upgrade pip
+.venv-api\Scripts\python -m pip install -r requirements-api.txt
+```
+
+Start the API service from the repository root:
+
+```powershell
+$env:RUNTIME_MODE="remote_inference"
+$env:INFERENCE_SERVICE_URL="http://127.0.0.1:8001"
+$env:INFERENCE_TIMEOUT_SECONDS="120"
+.venv-api\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
 ## 后续开发顺序
 
 1. 将 `inference` 服务的 `local_hf` 跑通并稳定加载 `Qwen3-8B 4bit`

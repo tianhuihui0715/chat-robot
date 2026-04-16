@@ -17,8 +17,20 @@ class InferenceGenerateResponse(BaseModel):
     model_name: str | None = None
 
 
+class InferenceIntentRequest(BaseModel):
+    messages: list[ChatMessage] = Field(min_length=1)
+
+
+class InferenceIntentResponse(BaseModel):
+    decision: IntentDecision
+    model_name: str | None = None
+    raw_output: str | None = None
+
+
 class InferenceHealthResponse(BaseModel):
     status: Literal["ok"]
     runtime_mode: Literal["mock", "local_hf"]
     model_loaded: bool
     model_name: str | None = None
+    intent_model_loaded: bool | None = None
+    intent_model_name: str | None = None

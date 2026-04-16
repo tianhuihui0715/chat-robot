@@ -8,7 +8,11 @@ from app.services.generator_service import (
     QueuedGenerationService,
     RemoteGenerationBackend,
 )
-from app.services.intent_service import MockIntentService
+from app.services.intent_service import (
+    IntentService,
+    MockIntentService,
+    RemoteIntentService,
+)
 from app.services.knowledge_base import InMemoryKnowledgeBase
 from app.services.retriever_service import InMemoryRetrieverService
 from app.services.trace_service import LangSmithObserver, TraceService
@@ -18,7 +22,7 @@ from app.services.trace_service import LangSmithObserver, TraceService
 class ServiceContainer:
     settings: Settings
     knowledge_base: InMemoryKnowledgeBase
-    intent_service: MockIntentService
+    intent_service: IntentService
     retriever_service: InMemoryRetrieverService
     generation_service: QueuedGenerationService
     trace_service: TraceService
@@ -26,16 +30,17 @@ class ServiceContainer:
 
     async def start(self) -> None:
         self.trace_service.setup()
+        await self.intent_service.start()
         await self.generation_service.start()
 
     async def stop(self) -> None:
         await self.generation_service.stop()
+        await self.intent_service.stop()
         await self.trace_service.shutdown()
 
 
 def build_service_container(settings: Settings) -> ServiceContainer:
     knowledge_base = InMemoryKnowledgeBase()
-    intent_service = MockIntentService()
     retriever_service = InMemoryRetrieverService(
         knowledge_base=knowledge_base,
         top_k=settings.rag_top_k,
@@ -53,12 +58,17 @@ def build_service_container(settings: Settings) -> ServiceContainer:
         observer=langsmith_observer,
     )
     if settings.runtime_mode == "remote_inference":
+        intent_service: IntentService = RemoteIntentService(
+            base_url=settings.inference_service_url,
+            timeout_seconds=settings.inference_timeout_seconds,
+        )
         generation_backend = RemoteGenerationBackend(
             base_url=settings.inference_service_url,
             timeout_seconds=settings.inference_timeout_seconds,
             max_new_tokens=settings.llm_max_new_tokens,
         )
     else:
+        intent_service = MockIntentService()
         generation_backend = MockGenerationBackend()
 
     generation_service = QueuedGenerationService(

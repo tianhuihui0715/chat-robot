@@ -6,6 +6,8 @@ Thumbs.db
 
 .venv/
 **/.venv/
+.venv-api/
+**/.venv-api/
 
 __pycache__/
 *.py[cod]
@@ -16,6 +18,7 @@ __pycache__/
 *.log
 .env
 .env.local
+token.txt
 
 data/
 .ruff_cache/
