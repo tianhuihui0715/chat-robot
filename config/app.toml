@@ -6,6 +6,15 @@ api_prefix = "/api/v1"
 
 [runtime]
 mode = "mock"
+inference_mode = "mock"
+inference_service_url = "http://localhost:8001"
+inference_timeout_seconds = 60
+
+[observability]
+trace_store_dsn = "sqlite:///./data/chat_robot.db"
+langsmith_enabled = false
+langsmith_project = "chat-robot"
+langsmith_endpoint = "https://api.smith.langchain.com"
 
 [database]
 host = "postgres"

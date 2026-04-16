@@ -9,35 +9,25 @@ services:
       - .env
     environment:
       APP_ENV: docker
-      RUNTIME_MODE: mock
-      LLM_MODEL_PATH: /models/Qwen3-8B
-      INTENT_MODEL_PATH: /models/Qwen2.5-1.5B-Instruct
-      EMBEDDING_MODEL_PATH: /models/bge-m3
-      RERANKER_MODEL_PATH: /models/bge-reranker-v2-m3
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: chat_robot
-      POSTGRES_USER: chat_robot
-      POSTGRES_PASSWORD: chat_robot
-      POSTGRES_DSN: postgresql+psycopg://chat_robot:chat_robot@postgres:5432/chat_robot
-      QDRANT_URL: http://qdrant:6333
+      RUNTIME_MODE: remote_inference
+      INFERENCE_SERVICE_URL: http://inference:8001
     ports:
       - "8000:8000"
     volumes:
       - .:/app
-      - ${HOST_MODEL_ROOT:-/root/models}:/models:ro
     depends_on:
       postgres:
         condition: service_healthy
       qdrant:
         condition: service_started
+      inference:
+        condition: service_healthy
     deploy:
       resources:
+        limits:
+          memory: 6G
         reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+          memory: 1G
     healthcheck:
       test:
         [
@@ -51,6 +41,46 @@ services:
       retries: 5
       start_period: 20s
 
+  inference:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chat-robot-inference
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["uvicorn", "app.inference.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      APP_ENV: docker
+      INFERENCE_RUNTIME_MODE: local_hf
+    ports:
+      - "8001:8001"
+    volumes:
+      - .:/app
+      - ${HOST_MODEL_ROOT:-/root/models}:${HOST_MODEL_ROOT:-/root/models}:ro
+    deploy:
+      resources:
+        limits:
+          memory: 14G
+        reservations:
+          memory: 4G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
   postgres:
     image: postgres:17
     container_name: chat-robot-postgres
@@ -63,6 +93,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U chat_robot -d chat_robot"]
       interval: 10s
@@ -73,11 +109,28 @@ services:
     image: qdrant/qdrant:latest
     container_name: chat-robot-qdrant
     restart: unless-stopped
+    environment:
+      QDRANT__STORAGE__ON_DISK_PAYLOAD: "true"
+      QDRANT__STORAGE__COLLECTION__VECTORS__ON_DISK: "true"
+      QDRANT__STORAGE__OPTIMIZERS__MEMMAP_THRESHOLD: 5000
+      QDRANT__STORAGE__OPTIMIZERS__INDEXING_THRESHOLD_KB: 20000
+      QDRANT__STORAGE__OPTIMIZERS__DEFAULT_SEGMENT_NUMBER: 2
+      QDRANT__STORAGE__OPTIMIZERS__MAX_OPTIMIZATION_THREADS: 1
+      QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS: 2
+      QDRANT__STORAGE__PERFORMANCE__OPTIMIZER_CPU_BUDGET: 1
+      QDRANT__STORAGE__HNSW_INDEX__ON_DISK: "true"
+      QDRANT__SERVICE__MAX_WORKERS: 2
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+        reservations:
+          memory: 2G
 
 volumes:
   postgres_data:

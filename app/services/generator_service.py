@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.schemas.chat import ChatMessage, IntentDecision, SourceChunk
+from app.schemas.inference import (
+    InferenceGenerateRequest,
+    InferenceGenerateResponse,
+)
 
 
 @dataclass
@@ -38,17 +42,66 @@ class MockGenerationBackend:
         )
 
         if request.sources:
-            source_titles = "、".join(source.title for source in request.sources[:3])
+            source_titles = ", ".join(source.title for source in request.sources[:3])
             return (
-                f"这是骨架阶段的 mock 回答。"
+                "这是骨架阶段的 mock 回答。"
                 f"我会围绕你的问题“{latest_user_message}”进行回答，"
                 f"并参考知识库片段：{source_titles}。"
             )
 
         return (
-            f"这是骨架阶段的 mock 回答。"
+            "这是骨架阶段的 mock 回答。"
             f"当前没有命中知识库，我收到的问题是：{latest_user_message}"
         )
+
+
+class RemoteGenerationBackend:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: float,
+        max_new_tokens: int,
+        transport: object | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._timeout_seconds = timeout_seconds
+        self._max_new_tokens = max_new_tokens
+        self._transport = transport
+        self._client = None
+        self._httpx = None
+
+    async def start(self) -> None:
+        import httpx
+
+        self._httpx = httpx
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=self._timeout_seconds,
+            transport=self._transport,
+        )
+
+    async def stop(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    async def generate(self, request: GenerationRequest) -> str:
+        if self._client is None:
+            raise RuntimeError("RemoteGenerationBackend has not been started.")
+
+        payload = InferenceGenerateRequest(
+            messages=request.messages,
+            intent=request.intent,
+            sources=request.sources,
+            max_new_tokens=self._max_new_tokens,
+        )
+        response = await self._client.post(
+            "/generate",
+            json=payload.model_dump(mode="json"),
+        )
+        response.raise_for_status()
+        body = InferenceGenerateResponse.model_validate(response.json())
+        return body.answer
 
 
 @dataclass

@@ -16,4 +16,5 @@ async def health(
         runtime_mode=container.settings.runtime_mode,
         queued_requests=container.generation_service.queue_size,
         knowledge_documents=container.knowledge_base.count,
+        trace_requests=container.trace_service.count_request_traces(),
     )

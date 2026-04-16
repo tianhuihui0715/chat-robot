@@ -26,6 +26,10 @@ ENV_MAPPING = {
     "LOG_LEVEL": "log_level",
     "API_PREFIX": "api_prefix",
     "RUNTIME_MODE": "runtime_mode",
+    "INFERENCE_RUNTIME_MODE": "inference_runtime_mode",
+    "INFERENCE_SERVICE_URL": "inference_service_url",
+    "INFERENCE_TIMEOUT_SECONDS": "inference_timeout_seconds",
+    "TRACE_STORE_DSN": "trace_store_dsn",
     "HOST_MODEL_ROOT": "host_model_root",
     "LLM_MODEL_PATH": "llm_model_path",
     "INTENT_MODEL_PATH": "intent_model_path",
@@ -43,6 +47,10 @@ ENV_MAPPING = {
     "POSTGRES_PASSWORD": "postgres_password",
     "POSTGRES_DSN": "postgres_dsn",
     "QDRANT_URL": "qdrant_url",
+    "LANGSMITH_ENABLED": "langsmith_enabled",
+    "LANGSMITH_PROJECT": "langsmith_project",
+    "LANGSMITH_ENDPOINT": "langsmith_endpoint",
+    "LANGSMITH_API_KEY": "langsmith_api_key",
 }
 
 
@@ -52,7 +60,11 @@ class Settings(BaseModel):
     log_level: str = "INFO"
     api_prefix: str = "/api/v1"
 
-    runtime_mode: Literal["mock", "local_hf"] = "mock"
+    runtime_mode: Literal["mock", "remote_inference"] = "mock"
+    inference_runtime_mode: Literal["mock", "local_hf"] = "mock"
+    inference_service_url: str = "http://localhost:8001"
+    inference_timeout_seconds: float = 60.0
+    trace_store_dsn: str = "sqlite:///./data/chat_robot.db"
 
     host_model_root: str = "/root/models"
     llm_model_path: str = ""
@@ -75,6 +87,10 @@ class Settings(BaseModel):
     postgres_dsn: str = "postgresql+psycopg://chat_robot:chat_robot@postgres:5432/chat_robot"
 
     qdrant_url: str = "http://qdrant:6333"
+    langsmith_enabled: bool = False
+    langsmith_project: str = "chat-robot"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_api_key: str | None = None
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -96,6 +112,13 @@ def _load_config_defaults() -> dict[str, Any]:
                     "log_level": data.get("app", {}).get("log_level"),
                     "api_prefix": data.get("app", {}).get("api_prefix"),
                     "runtime_mode": data.get("runtime", {}).get("mode"),
+                    "inference_runtime_mode": data.get("runtime", {}).get("inference_mode"),
+                    "inference_service_url": data.get("runtime", {}).get("inference_service_url"),
+                    "inference_timeout_seconds": data.get("runtime", {}).get("inference_timeout_seconds"),
+                    "trace_store_dsn": data.get("observability", {}).get("trace_store_dsn"),
+                    "langsmith_enabled": data.get("observability", {}).get("langsmith_enabled"),
+                    "langsmith_project": data.get("observability", {}).get("langsmith_project"),
+                    "langsmith_endpoint": data.get("observability", {}).get("langsmith_endpoint"),
                     "postgres_host": data.get("database", {}).get("host"),
                     "postgres_port": data.get("database", {}).get("port"),
                     "postgres_db": data.get("database", {}).get("name"),

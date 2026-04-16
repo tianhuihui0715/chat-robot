@@ -1,0 +1,319 @@
+from __future__ import annotations
+
+from contextlib import contextmanager
+from dataclasses import dataclass
+from time import perf_counter
+from typing import Any
+
+from app.persistence.trace_store import SQLTraceStore
+
+
+@dataclass
+class LangSmithRunHandle:
+    run_id: str | None = None
+    trace_id: str | None = None
+    _run_tree: Any | None = None
+
+    def end(self, outputs: dict[str, Any]) -> None:
+        if self._run_tree is not None:
+            self._run_tree.end(outputs=outputs)
+
+
+class LangSmithObserver:
+    def __init__(
+        self,
+        enabled: bool,
+        project_name: str,
+        endpoint: str,
+        api_key: str | None,
+    ) -> None:
+        self._available = False
+        self._project_name = project_name
+        self._client = None
+        self._ls = None
+
+        if not enabled or not api_key:
+            return
+
+        try:
+            import langsmith as ls
+            from langsmith import Client
+        except ImportError:
+            return
+
+        self._ls = ls
+        self._client = Client(api_key=api_key, api_url=endpoint)
+        self._available = True
+
+    @contextmanager
+    def root_trace(self, name: str, inputs: dict[str, Any]):
+        if not self._available:
+            yield LangSmithRunHandle()
+            return
+
+        with self._ls.tracing_context(  # type: ignore[union-attr]
+            client=self._client,
+            project_name=self._project_name,
+            enabled=True,
+        ):
+            with self._ls.trace(name, "chain", inputs=inputs) as run_tree:  # type: ignore[union-attr]
+                yield LangSmithRunHandle(
+                    run_id=str(getattr(run_tree, "id", "")) or None,
+                    trace_id=str(getattr(run_tree, "trace_id", "")) or None,
+                    _run_tree=run_tree,
+                )
+
+    @contextmanager
+    def child_trace(self, name: str, run_type: str, inputs: dict[str, Any]):
+        if not self._available:
+            yield LangSmithRunHandle()
+            return
+
+        with self._ls.trace(name, run_type, inputs=inputs) as run_tree:  # type: ignore[union-attr]
+            yield LangSmithRunHandle(
+                run_id=str(getattr(run_tree, "id", "")) or None,
+                trace_id=str(getattr(run_tree, "trace_id", "")) or None,
+                _run_tree=run_tree,
+            )
+
+    async def flush(self) -> None:
+        if self._client is None:
+            return
+        flush = getattr(self._client, "flush", None)
+        if flush is None:
+            return
+        maybe_awaitable = flush()
+        if hasattr(maybe_awaitable, "__await__"):
+            await maybe_awaitable
+
+
+@dataclass
+class ActiveTrace:
+    request_id: str
+    session_id: str | None
+    user_input: str
+    langsmith_trace_id: str | None
+    started_at: float
+    _step_order: int = 0
+    completed: bool = False
+
+    def next_step_order(self) -> int:
+        self._step_order += 1
+        return self._step_order
+
+
+@dataclass
+class ActiveStep:
+    step_id: str
+    request_id: str
+    step_type: str
+    step_order: int
+    started_at: float
+    observer_handle: LangSmithRunHandle
+    completed: bool = False
+
+
+class TraceService:
+    def __init__(self, store: SQLTraceStore, observer: LangSmithObserver) -> None:
+        self._store = store
+        self._observer = observer
+
+    def setup(self) -> None:
+        self._store.setup()
+
+    async def shutdown(self) -> None:
+        await self._observer.flush()
+
+    def count_request_traces(self) -> int:
+        return self._store.count_request_traces()
+
+    @contextmanager
+    def request_trace(self, session_id: str | None, user_input: str):
+        with self._observer.root_trace(
+            "chat_pipeline",
+            {
+                "user_input": user_input,
+                "session_id": session_id,
+            },
+        ) as observer_handle:
+            request_id = self._store.create_request_trace(
+                session_id=session_id,
+                user_input=user_input,
+                langsmith_trace_id=observer_handle.trace_id,
+            )
+            active_trace = ActiveTrace(
+                request_id=request_id,
+                session_id=session_id,
+                user_input=user_input,
+                langsmith_trace_id=observer_handle.trace_id,
+                started_at=perf_counter(),
+            )
+            try:
+                yield active_trace
+            except Exception as exc:
+                if not active_trace.completed:
+                    self.fail_request_trace(active_trace, str(exc))
+                    observer_handle.end(outputs={"status": "error", "error": str(exc)})
+                raise
+
+    @contextmanager
+    def step_trace(
+        self,
+        active_trace: ActiveTrace,
+        step_type: str,
+        run_type: str,
+        inputs: dict[str, Any],
+    ):
+        step_order = active_trace.next_step_order()
+        with self._observer.child_trace(step_type, run_type, inputs) as observer_handle:
+            step_id = self._store.create_step(
+                request_id=active_trace.request_id,
+                step_type=step_type,
+                step_order=step_order,
+                langsmith_run_id=observer_handle.run_id,
+            )
+            active_step = ActiveStep(
+                step_id=step_id,
+                request_id=active_trace.request_id,
+                step_type=step_type,
+                step_order=step_order,
+                started_at=perf_counter(),
+                observer_handle=observer_handle,
+            )
+            try:
+                yield active_step
+            except Exception as exc:
+                if not active_step.completed:
+                    self.fail_step(active_step, str(exc))
+                    observer_handle.end(outputs={"status": "error", "error": str(exc)})
+                raise
+
+    def complete_intent_step(
+        self,
+        active_trace: ActiveTrace,
+        active_step: ActiveStep,
+        input_text: str,
+        intent: str,
+        need_rag: bool,
+        rewrite_query: str,
+        rationale: str,
+    ) -> None:
+        record_id = self._store.create_intent_record(
+            request_id=active_trace.request_id,
+            input_text=input_text,
+            intent=intent,
+            need_rag=need_rag,
+            rewrite_query=rewrite_query,
+            model_output={
+                "intent": intent,
+                "need_rag": need_rag,
+                "rewrite_query": rewrite_query,
+                "rationale": rationale,
+            },
+        )
+        self._complete_step(
+            active_step=active_step,
+            record_ref_type="intent_record",
+            record_ref_id=record_id,
+            outputs={
+                "intent": intent,
+                "need_rag": need_rag,
+                "rewrite_query": rewrite_query,
+            },
+        )
+
+    def complete_retrieval_step(
+        self,
+        active_step: ActiveStep,
+        request_id: str,
+        query: str,
+        retrieved_ids: list[str],
+    ) -> None:
+        record_id = self._store.create_retrieval_record(
+            request_id=request_id,
+            query=query,
+            retrieved_ids=retrieved_ids,
+        )
+        self._complete_step(
+            active_step=active_step,
+            record_ref_type="retrieval_record",
+            record_ref_id=record_id,
+            outputs={
+                "retrieved_ids": retrieved_ids,
+                "retrieved_count": len(retrieved_ids),
+            },
+        )
+
+    def complete_generation_step(
+        self,
+        active_step: ActiveStep,
+        request_id: str,
+        user_input: str,
+        used_source_ids: list[str],
+        llm_output: str,
+    ) -> None:
+        record_id = self._store.create_generation_record(
+            request_id=request_id,
+            user_input=user_input,
+            used_source_ids=used_source_ids,
+            llm_output=llm_output,
+        )
+        self._complete_step(
+            active_step=active_step,
+            record_ref_type="generation_record",
+            record_ref_id=record_id,
+            outputs={"output": llm_output},
+        )
+
+    def complete_request_trace(
+        self,
+        active_trace: ActiveTrace,
+        intent: str | None,
+        need_rag: bool | None,
+        final_output: str,
+    ) -> None:
+        total_latency_ms = self._elapsed_ms(active_trace.started_at)
+        self._store.complete_request_trace(
+            request_id=active_trace.request_id,
+            intent=intent,
+            need_rag=need_rag,
+            final_output=final_output,
+            total_latency_ms=total_latency_ms,
+        )
+        active_trace.completed = True
+
+    def fail_request_trace(self, active_trace: ActiveTrace, error_message: str) -> None:
+        self._store.fail_request_trace(
+            request_id=active_trace.request_id,
+            error_message=error_message,
+            total_latency_ms=self._elapsed_ms(active_trace.started_at),
+        )
+        active_trace.completed = True
+
+    def fail_step(self, active_step: ActiveStep, error_message: str) -> None:
+        self._store.fail_step(
+            step_id=active_step.step_id,
+            latency_ms=self._elapsed_ms(active_step.started_at),
+            error_message=error_message,
+        )
+        active_step.completed = True
+
+    def _complete_step(
+        self,
+        active_step: ActiveStep,
+        record_ref_type: str,
+        record_ref_id: str,
+        outputs: dict[str, Any],
+    ) -> None:
+        self._store.complete_step(
+            step_id=active_step.step_id,
+            latency_ms=self._elapsed_ms(active_step.started_at),
+            record_ref_type=record_ref_type,
+            record_ref_id=record_ref_id,
+        )
+        active_step.completed = True
+        active_step.observer_handle.end(outputs=outputs)
+
+    @staticmethod
+    def _elapsed_ms(started_at: float) -> int:
+        return int((perf_counter() - started_at) * 1000)

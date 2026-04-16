@@ -1,124 +1,158 @@
 # Chat Robot
 
-本仓库用于搭建一个本地智能聊天系统，目标架构是：
+一个面向本地部署场景的智能聊天系统骨架，当前采用“方案 B”：
 
-- `Qwen3-8B` 作为基座模型
-- `Qwen2.5-1.5B-Instruct` 作为意图识别/路由模型
-- `bge-m3` 作为 embedding 模型
-- `bge-reranker-v2-m3` 作为重排模型
-- `FastAPI` 作为服务入口
-- 单并发 GPU 生成队列，避免 12GB 显存被并发请求压爆
+- `api` 主服务负责业务编排、请求 trace、本地流程复现和后续 RAG/工具调用
+- `inference` 独立推理服务负责模型加载与生成，便于把 WSL/GPU 环境和业务服务解耦
+- `postgres` 负责业务数据
+- `qdrant` 负责向量检索
 
 ## 当前状态
 
-当前仓库提供的是第一版可运行骨架：
+目前仓库已经具备这些能力：
 
-- `POST /api/v1/chat`：对话接口
-- `POST /api/v1/knowledge/ingest`：导入知识文档
-- `GET /api/v1/health`：健康检查
-- 内置 mock 意图识别、mock 检索和单并发生成队列
+- `POST /api/v1/chat`
+- `POST /api/v1/knowledge/ingest`
+- `GET /api/v1/health`
+- 本地 trace 骨架持久化，可脱离 LangSmith 复现流程
+- `api -> inference` 远程生成链路
+- 独立推理服务入口：`app.inference.main:app`
 
-这版重点是先把服务形态、目录结构和调用链路搭起来，后续再逐步替换成真实模型加载逻辑。
+当前仍然保留 `mock` 运行模式，便于在没有模型环境的机器上继续开发主服务。
 
-## 目录结构
+## 架构说明
 
-```text
-app/
-  api/                FastAPI 路由
-  core/               配置和日志
-  schemas/            请求/响应模型
-  services/           意图识别、检索、生成、队列、流程编排
-config/               静态默认配置（TOML）
-pyproject.toml        项目元数据、依赖、工具链配置
-requirements.txt      兼容入口，内部转发到 pyproject
-requirements-train.txt 训练依赖兼容入口
-.env.example          本地配置示例
-```
+### API 主服务
 
-## 快速启动
+主服务负责：
 
-1. 安装依赖
+- 接收对话请求
+- 记录 request trace / trace steps / 各节点明细
+- 后续承载意图识别、RAG、工具调用
+- 通过 HTTP 调用独立推理服务
+
+### Inference 推理服务
+
+推理服务负责：
+
+- 独立加载 `Qwen3-8B`
+- 接收标准化生成请求
+- 返回最终回答
+- 与业务服务解耦，便于单独部署到 WSL/GPU 环境
+
+当前已支持两种推理服务模式：
+
+- `mock`
+- `local_hf`
+
+## 观测设计
+
+项目采用双轨观测：
+
+- `LangSmith`
+  - 仅记录轻量链路轨迹和映射关系
+- 本地数据库
+  - 记录 request trace 骨架
+  - 记录步骤骨架
+  - 记录意图、检索、生成等节点明细
+
+这样即使脱离 LangSmith 云平台，也可以在后台复现一次请求流程。
+
+## 配置分层
+
+- `pyproject.toml`
+  - 项目元数据、依赖、工具链
+- `config/*.toml`
+  - 静态默认配置
+- `.env`
+  - 当前环境覆盖项
+
+推荐原则：
+
+- 模型路径、生成参数、数据库地址这类运行参数优先放 `config/*.toml` 和 `.env`
+- `docker-compose.yml` 只描述部署拓扑、容器依赖、卷挂载和少量运行模式覆盖
+
+## 关键配置
+
+### API 主服务
+
+- `RUNTIME_MODE`
+  - `mock`
+  - `remote_inference`
+
+### 推理服务
+
+- `INFERENCE_RUNTIME_MODE`
+  - `mock`
+  - `local_hf`
+
+### 服务间调用
+
+- `INFERENCE_SERVICE_URL`
+- `INFERENCE_TIMEOUT_SECONDS`
+
+## 本地启动
+
+安装依赖：
 
 ```bash
 pip3 install -e .
 ```
 
-2. 复制配置
+复制配置：
 
 ```bash
 cp .env.example .env
 ```
 
-3. 启动服务
+启动 API 主服务：
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-4. 打开文档
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-## 配置分层
-
-当前项目使用三层配置：
-
-- `pyproject.toml`
-  用来维护项目版本、依赖和工具链配置
-- `config/*.toml`
-  用来维护静态默认配置，例如模型路径默认值、RAG 参数、数据库默认地址
-- `.env`
-  用来覆盖运行时配置，例如本机模型目录、Docker 地址、密码和运行模式
-
-推荐原则：
-
-- 会随环境变化的内容放 `.env`
-- 项目级默认策略放 `config/*.toml`
-- 依赖和版本放 `pyproject.toml`
-
-## Docker 部署
-
-这套项目适合用 `docker compose` 跑成多服务：
-
-- `api`：FastAPI 应用
-- `postgres`：业务数据、会话、日志
-- `qdrant`：向量库
-
-模型不打进镜像，而是从宿主机目录挂载到容器内。对你当前的 WSL 环境，默认挂载目录是 `/root/models`。
-
-1. 准备配置
+启动独立推理服务：
 
 ```bash
-cp .env.example .env
+uvicorn app.inference.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-2. 构建并启动
+## Docker Compose
+
+当前 `docker-compose.yml` 已按方案 B 拆分：
+
+- `api`
+- `inference`
+- `postgres`
+- `qdrant`
+
+其中：
+
+- 模型路径和生成参数默认读取 `config/models.toml` 或 `.env`
+- `compose` 只额外覆盖
+  - `RUNTIME_MODE=remote_inference`
+  - `INFERENCE_SERVICE_URL=http://inference:8001`
+  - `INFERENCE_RUNTIME_MODE=local_hf`
+
+启动：
 
 ```bash
 docker compose up --build -d
 ```
 
-3. 查看状态
+查看状态：
 
 ```bash
 docker compose ps
 docker compose logs -f api
+docker compose logs -f inference
 ```
-
-4. 停止服务
-
-```bash
-docker compose down
-```
-
-如果你要保留数据库和向量库数据，不要加 `-v`。
 
 ## 后续开发顺序
 
-1. 将 mock 生成服务替换为 `Qwen3-8B 4bit` 实际加载
-2. 将 mock 意图识别替换为 `Qwen2.5-1.5B-Instruct`
-3. 将内存检索替换为 `bge-m3 + FAISS`
-4. 增加 `bge-reranker-v2-m3` 重排
-5. 增加会话存储、日志和评测脚本
+1. 将 `inference` 服务的 `local_hf` 跑通并稳定加载 `Qwen3-8B 4bit`
+2. 将意图识别模型也迁入独立推理服务或独立路由服务
+3. 将主服务检索链路替换为 `bge-m3 + Qdrant`
+4. 接入 `bge-reranker-v2-m3`
+5. 增加后台 trace 查询接口和页面
+6. 再继续推进工具系统、双检索、评测与蒸馏

@@ -33,3 +33,4 @@ class ChatResponse(BaseModel):
     intent: IntentDecision
     sources: list[SourceChunk] = Field(default_factory=list)
     queue_size: int = 0
+    request_id: str | None = None
