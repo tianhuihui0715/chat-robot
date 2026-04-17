@@ -219,6 +219,10 @@ class LocalHFIntentBackend:
             self._unload()
 
     async def decide(self, request: InferenceIntentRequest) -> tuple[IntentDecision, str]:
+        rule_decision = _rule_based_intent_decision(request.messages)
+        if rule_decision is not None:
+            return rule_decision, rule_decision.model_dump_json(ensure_ascii=False)
+
         async with self._load_lock:
             await self._ensure_loaded()
 
@@ -552,3 +556,150 @@ def _extract_json_object(text: str) -> str:
     if start == -1 or end == -1 or end <= start:
         raise ValueError("No JSON object found in model output.")
     return text[start : end + 1]
+
+
+def _rule_based_intent_decision(messages: list[ChatMessage]) -> IntentDecision | None:
+    latest_user_message = next(
+        (message.content for message in reversed(messages) if message.role == "user"),
+        "",
+    ).strip()
+    if not latest_user_message:
+        return None
+
+    if _matches_reject_rule(latest_user_message):
+        return IntentDecision(
+            intent="reject",
+            need_rag=False,
+            rewrite_query=latest_user_message,
+            rationale="命中高风险请求规则，判定为 reject。",
+        )
+
+    if _matches_chat_rule(latest_user_message):
+        return IntentDecision(
+            intent="chat",
+            need_rag=False,
+            rewrite_query=latest_user_message,
+            rationale="命中问候或闲聊规则，判定为 chat。",
+        )
+
+    if _looks_like_follow_up_by_rules(messages):
+        expanded_query = _expand_follow_up_query(latest_user_message, messages)
+        need_rag = _follow_up_needs_rag(expanded_query, messages)
+        return IntentDecision(
+            intent="follow_up",
+            need_rag=need_rag,
+            rewrite_query=expanded_query,
+            rationale="命中上下文追问规则，判定为 follow_up。",
+        )
+
+    return None
+
+
+def _matches_reject_rule(text: str) -> bool:
+    normalized = text.lower().replace(" ", "")
+    if not normalized:
+        return False
+
+    reject_patterns = (
+        r"制作.*炸弹",
+        r"炸弹.*制作",
+        r"窃取.*(账号|账[号戶]|密码|凭证)",
+        r"(盗取|窃取).*(密码|账号|隐私|凭证)",
+        r"入侵.*(服务器|系统|网站)",
+        r"骗取.*(隐私|信息|资料)",
+        r"(木马|勒索|钓鱼).*(脚本|程序|代码)",
+    )
+    reject_keywords = (
+        "炸弹",
+        "窃取账号",
+        "窃取密码",
+        "入侵服务器",
+        "骗取隐私",
+        "恶意脚本",
+        "钓鱼话术",
+    )
+    return any(keyword in normalized for keyword in reject_keywords) or any(
+        re.search(pattern, normalized) for pattern in reject_patterns
+    )
+
+
+def _matches_chat_rule(text: str) -> bool:
+    normalized = text.strip().lower()
+    if len(normalized) > 20:
+        return False
+
+    chat_patterns = (
+        r"^(你好|您好|嗨|hi|hello)[！!。,.，]*$",
+        r"^(谢谢|感谢|辛苦了|多谢)[！!。,.，]*$",
+        r"^(再见|拜拜|晚安)[！!。,.，]*$",
+        r"^你(是谁|能做什么).*$",
+    )
+    return any(re.match(pattern, normalized) for pattern in chat_patterns)
+
+
+def _looks_like_follow_up_by_rules(messages: list[ChatMessage]) -> bool:
+    latest_user_message = next(
+        (message.content for message in reversed(messages) if message.role == "user"),
+        "",
+    ).strip()
+    if not latest_user_message:
+        return False
+
+    prior_messages = [
+        message
+        for message in messages[:-1]
+        if message.role in {"user", "assistant"} and message.content.strip()
+    ]
+    if not prior_messages:
+        return False
+
+    normalized = latest_user_message.replace(" ", "")
+    follow_up_markers = (
+        "那",
+        "这个",
+        "那个",
+        "这边",
+        "那边",
+        "刚才",
+        "上一个",
+        "上面",
+        "继续",
+        "然后",
+        "还有吗",
+        "详细说说",
+        "展开说说",
+        "放哪",
+        "怎么配",
+        "怎么启动",
+        "为什么",
+    )
+    if any(normalized.startswith(marker) for marker in follow_up_markers):
+        return True
+
+    return _looks_like_follow_up_fragment(latest_user_message)
+
+
+def _follow_up_needs_rag(expanded_query: str, messages: list[ChatMessage]) -> bool:
+    rag_keywords = (
+        "文档",
+        "知识库",
+        "部署",
+        "说明",
+        "配置",
+        "接口",
+        "启动",
+        "参数",
+        "项目",
+        "qdrant",
+        "docker",
+        "windows",
+        "linux",
+    )
+    previous_user = ""
+    for message in reversed(messages[:-1]):
+        if message.role == "user" and message.content.strip():
+            previous_user = message.content.strip()
+            break
+
+    haystack = f"{expanded_query}\n{previous_user}".lower()
+    return any(keyword in haystack for keyword in rag_keywords)
