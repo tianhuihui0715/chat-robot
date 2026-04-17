@@ -94,6 +94,7 @@ class ActiveTrace:
     user_input: str
     langsmith_trace_id: str | None
     started_at: float
+    observer_handle: LangSmithRunHandle
     _step_order: int = 0
     completed: bool = False
 
@@ -147,6 +148,7 @@ class TraceService:
                 user_input=user_input,
                 langsmith_trace_id=observer_handle.trace_id,
                 started_at=perf_counter(),
+                observer_handle=observer_handle,
             )
             try:
                 yield active_trace
@@ -279,6 +281,14 @@ class TraceService:
             need_rag=need_rag,
             final_output=final_output,
             total_latency_ms=total_latency_ms,
+        )
+        active_trace.observer_handle.end(
+            outputs={
+                "intent": intent,
+                "need_rag": need_rag,
+                "final_output": final_output,
+                "request_id": active_trace.request_id,
+            }
         )
         active_trace.completed = True
 

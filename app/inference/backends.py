@@ -244,11 +244,13 @@ class LocalHFIntentBackend:
             "判断规则：\n"
             "- knowledge_qa: 需要查询项目、文档、配置、接口、事实知识。\n"
             "- task: 明确要求执行任务、编写代码、制定方案、产出结构化结果。\n"
-            "- follow_up: 明显依赖上一轮上下文的追问、补充、澄清。\n"
+            "- follow_up: 明显依赖上一轮上下文的追问、补充、澄清；如果脱离上文无法完整理解，应优先判为 follow_up。\n"
+            "- 如果最后一句同时像知识问答又明显依赖上文，请优先使用 follow_up，而不是 knowledge_qa。\n"
             "- reject: 涉及违法、危险或不应回答的请求。\n"
             "- 其余情况一律使用 chat。\n"
             "rewrite_query 规则：\n"
             "- 绝不能凭空改写成新的问题。\n"
+            "- 对 follow_up 允许结合上一轮上下文补全主语，使其变成可独立理解的完整问题。\n"
             "- 如果 need_rag=true，rewrite_query 应尽量保留用户原意，只做轻微压缩和规范化。\n"
             "- 如果 need_rag=false，rewrite_query 直接等于最后一条用户消息。\n"
             "- 不要输出“您有什么问题吗”“请提供更多信息”之类泛化句子。\n"
@@ -272,7 +274,17 @@ class LocalHFIntentBackend:
             '输入对话:\n'
             '[{"role":"user","content":"继续上一个问题"}]\n'
             '输出:\n'
-            '{"intent":"follow_up","need_rag":false,"rewrite_query":"继续上一个问题","rationale":"用户在追问上一轮内容，属于 follow_up。"}'
+            '{"intent":"follow_up","need_rag":false,"rewrite_query":"继续上一个问题","rationale":"用户在追问上一轮内容，属于 follow_up。"}\n\n'
+            '示例4:\n'
+            '输入对话:\n'
+            '[{"role":"user","content":"这个项目的部署方式是什么？"},{"role":"assistant","content":"可以使用 Docker 或直接启动服务。"},{"role":"user","content":"那 Windows 这边怎么配？"}]\n'
+            '输出:\n'
+            '{"intent":"follow_up","need_rag":true,"rewrite_query":"这个项目在 Windows 环境下怎么配置？","rationale":"最后一句依赖上一轮部署上下文，属于追问。"}\n\n'
+            '示例5:\n'
+            '输入对话:\n'
+            '[{"role":"user","content":"当前项目后续要做什么？"},{"role":"assistant","content":"后续要做真实 RAG、reranker 和后台 trace 页面。"},{"role":"user","content":"那按阶段列一下。"}]\n'
+            '输出:\n'
+            '{"intent":"task","need_rag":false,"rewrite_query":"按阶段列出当前项目的后续开发计划","rationale":"用户要求产出结构化计划，属于任务执行。"}'
         )
 
         chat_messages: list[dict[str, str]] = [
@@ -438,7 +450,12 @@ def _parse_intent_decision(output: str, messages: list[ChatMessage]) -> IntentDe
     except Exception:
         return fallback
 
-    rewrite_query = _normalize_rewrite_query(decision.rewrite_query, latest_user_message)
+    rewrite_query = _normalize_rewrite_query(
+        rewrite_query=decision.rewrite_query,
+        latest_user_message=latest_user_message,
+        messages=messages,
+        intent=decision.intent,
+    )
     rationale = decision.rationale.strip() or fallback.rationale
     need_rag = decision.need_rag if decision.intent != "reject" else False
 
@@ -450,16 +467,23 @@ def _parse_intent_decision(output: str, messages: list[ChatMessage]) -> IntentDe
     )
 
 
-def _normalize_rewrite_query(rewrite_query: str, latest_user_message: str) -> str:
+def _normalize_rewrite_query(
+    rewrite_query: str,
+    latest_user_message: str,
+    messages: list[ChatMessage],
+    intent: str,
+) -> str:
     candidate = rewrite_query.strip()
     if not candidate:
-        return latest_user_message
+        candidate = latest_user_message
     if _looks_like_generic_question(candidate):
-        return latest_user_message
+        candidate = latest_user_message
     if len(candidate) <= 2:
-        return latest_user_message
+        candidate = latest_user_message
     if not _has_meaningful_overlap(candidate, latest_user_message):
-        return latest_user_message
+        candidate = latest_user_message
+    if intent == "follow_up":
+        candidate = _expand_follow_up_query(candidate, messages)
     return candidate
 
 
@@ -487,6 +511,45 @@ def _has_meaningful_overlap(candidate: str, original: str) -> bool:
 def _extract_keywords(text: str) -> set[str]:
     tokens = set(re.findall(r"[A-Za-z0-9_+-]+|[\u4e00-\u9fff]{2,}", text))
     return {token.lower() for token in tokens if token.strip()}
+
+
+def _expand_follow_up_query(candidate: str, messages: list[ChatMessage]) -> str:
+    if not _looks_like_follow_up_fragment(candidate):
+        return candidate
+
+    previous_user = ""
+    for message in reversed(messages[:-1]):
+        if message.role == "user" and message.content.strip():
+            previous_user = message.content.strip()
+            break
+
+    if not previous_user:
+        return candidate
+
+    return f"{previous_user}；补充问题：{candidate}"
+
+
+def _looks_like_follow_up_fragment(text: str) -> bool:
+    normalized = text.strip()
+    if len(normalized) <= 10:
+        return True
+
+    fragment_markers = (
+        "那",
+        "这个",
+        "这个呢",
+        "那个",
+        "那这个",
+        "那这个呢",
+        "那 Windows",
+        "详细说说",
+        "继续",
+        "为什么",
+        "怎么配",
+        "怎么做",
+        "放哪",
+    )
+    return any(normalized.startswith(marker) for marker in fragment_markers)
 
 
 def _extract_json_object(text: str) -> str:
