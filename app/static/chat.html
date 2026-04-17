@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat Robot Console</title>
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body class="app-shell app-shell--chat">
+    <div class="background-grid" aria-hidden="true"></div>
+    <main class="layout">
+      <section class="hero-card">
+        <div class="hero-card__copy">
+          <p class="eyebrow">Chat Robot</p>
+          <h1>本地对话控制台</h1>
+          <p class="lede">
+            在一个页面里测试聊天链路、查看系统健康状态，并快速跳转到请求轨迹面板。
+          </p>
+        </div>
+        <div class="hero-card__actions">
+          <a class="button button--ghost" href="/docs">API Docs</a>
+          <a class="button button--primary" href="/traces">查看过程日志</a>
+        </div>
+      </section>
+
+      <section class="status-strip" id="status-strip">
+        <article class="status-tile">
+          <span class="status-tile__label">API 状态</span>
+          <strong class="status-tile__value" id="api-status">检测中</strong>
+        </article>
+        <article class="status-tile">
+          <span class="status-tile__label">运行模式</span>
+          <strong class="status-tile__value" id="runtime-mode">-</strong>
+        </article>
+        <article class="status-tile">
+          <span class="status-tile__label">请求轨迹数</span>
+          <strong class="status-tile__value" id="trace-count">-</strong>
+        </article>
+        <article class="status-tile">
+          <span class="status-tile__label">知识文档数</span>
+          <strong class="status-tile__value" id="knowledge-count">-</strong>
+        </article>
+      </section>
+
+      <section class="panel-grid">
+        <section class="panel panel--conversation">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Conversation</p>
+              <h2>对话窗口</h2>
+            </div>
+            <button class="button button--ghost button--small" id="clear-chat">清空会话</button>
+          </div>
+
+          <div class="chat-feed" id="chat-feed">
+            <article class="bubble bubble--assistant">
+              <span class="bubble__role">Assistant</span>
+              <p>你好，我已经准备好了。你可以直接在这里测试本地聊天链路。</p>
+            </article>
+          </div>
+
+          <form class="composer" id="chat-form">
+            <label class="composer__label" for="chat-input">输入问题</label>
+            <textarea
+              id="chat-input"
+              name="chat-input"
+              rows="4"
+              placeholder="例如：这个项目的接口怎么配置？"
+              required
+            ></textarea>
+            <div class="composer__actions">
+              <span class="hint" id="chat-hint">接口目标：/api/v1/chat</span>
+              <button class="button button--primary" id="send-button" type="submit">
+                发送请求
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <aside class="panel panel--inspector">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Inspector</p>
+              <h2>响应快照</h2>
+            </div>
+          </div>
+
+          <dl class="definition-list">
+            <div>
+              <dt>最新 request_id</dt>
+              <dd id="request-id">-</dd>
+            </div>
+            <div>
+              <dt>意图</dt>
+              <dd id="intent-value">-</dd>
+            </div>
+            <div>
+              <dt>是否需要 RAG</dt>
+              <dd id="need-rag-value">-</dd>
+            </div>
+            <div>
+              <dt>改写查询</dt>
+              <dd id="rewrite-query-value">-</dd>
+            </div>
+          </dl>
+
+          <div class="detail-card">
+            <h3>意图依据</h3>
+            <p id="intent-rationale">等待请求。</p>
+          </div>
+
+          <div class="detail-card">
+            <div class="detail-card__title-row">
+              <h3>原始响应</h3>
+              <a class="text-link" id="trace-link" href="/traces">在日志页查看</a>
+            </div>
+            <pre class="code-block" id="raw-response">{}</pre>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/static/js/chat-page.js" defer></script>
+  </body>
+</html>

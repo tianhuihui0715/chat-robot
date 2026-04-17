@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trace Dashboard</title>
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body class="app-shell app-shell--traces">
+    <div class="background-grid" aria-hidden="true"></div>
+    <main class="layout">
+      <section class="hero-card">
+        <div class="hero-card__copy">
+          <p class="eyebrow">Trace Dashboard</p>
+          <h1>过程日志面板</h1>
+          <p class="lede">
+            追踪每次请求的意图判断、检索、生成步骤和最终输出，方便你逐步复测整条链路。
+          </p>
+        </div>
+        <div class="hero-card__actions">
+          <a class="button button--ghost" href="/">返回聊天页</a>
+          <button class="button button--primary" id="refresh-traces" type="button">刷新日志</button>
+        </div>
+      </section>
+
+      <section class="status-strip">
+        <article class="status-tile">
+          <span class="status-tile__label">当前选中</span>
+          <strong class="status-tile__value" id="selected-trace">-</strong>
+        </article>
+        <article class="status-tile">
+          <span class="status-tile__label">请求状态</span>
+          <strong class="status-tile__value" id="selected-status">-</strong>
+        </article>
+        <article class="status-tile">
+          <span class="status-tile__label">总耗时</span>
+          <strong class="status-tile__value" id="selected-latency">-</strong>
+        </article>
+        <article class="status-tile">
+          <span class="status-tile__label">步骤数</span>
+          <strong class="status-tile__value" id="selected-steps">-</strong>
+        </article>
+      </section>
+
+      <section class="panel-grid panel-grid--wide">
+        <section class="panel panel--list">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Requests</p>
+              <h2>请求列表</h2>
+            </div>
+          </div>
+          <div class="trace-list" id="trace-list"></div>
+        </section>
+
+        <section class="panel panel--detail">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Timeline</p>
+              <h2>执行明细</h2>
+            </div>
+          </div>
+
+          <div class="trace-summary" id="trace-summary">
+            <p>选择左侧一条请求以查看详情。</p>
+          </div>
+
+          <div class="timeline" id="trace-timeline"></div>
+
+          <div class="detail-split">
+            <div class="detail-card">
+              <h3>最终输出</h3>
+              <pre class="code-block" id="trace-output">-</pre>
+            </div>
+            <div class="detail-card">
+              <h3>原始详情</h3>
+              <pre class="code-block" id="trace-raw">-</pre>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/js/traces-page.js" defer></script>
+  </body>
+</html>

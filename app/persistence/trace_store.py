@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import make_url
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.persistence.models import (
     Base,
@@ -205,6 +205,54 @@ class SQLTraceStore:
     def count_request_traces(self) -> int:
         with self.session() as session:
             return len(session.scalars(select(RequestTrace.request_id)).all())
+
+    def list_request_traces(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        session_id: str | None = None,
+        status: str | None = None,
+    ) -> tuple[list[RequestTrace], int]:
+        with self.session() as session:
+            stmt = select(RequestTrace)
+            if session_id is not None:
+                stmt = stmt.where(RequestTrace.session_id == session_id)
+            if status is not None:
+                stmt = stmt.where(RequestTrace.status == status)
+
+            total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+            items = session.scalars(
+                stmt.options(selectinload(RequestTrace.steps))
+                .order_by(RequestTrace.created_at.desc(), RequestTrace.request_id.desc())
+                .limit(limit)
+                .offset(offset)
+            ).all()
+            return items, int(total)
+
+    def get_request_trace(self, request_id: str) -> RequestTrace | None:
+        with self.session() as session:
+            stmt = (
+                select(RequestTrace)
+                .where(RequestTrace.request_id == request_id)
+                .options(selectinload(RequestTrace.steps))
+            )
+            return session.scalars(stmt).first()
+
+    def get_intent_record(self, request_id: str) -> IntentRecord | None:
+        with self.session() as session:
+            stmt = select(IntentRecord).where(IntentRecord.request_id == request_id)
+            return session.scalars(stmt).first()
+
+    def get_retrieval_record(self, request_id: str) -> RetrievalRecord | None:
+        with self.session() as session:
+            stmt = select(RetrievalRecord).where(RetrievalRecord.request_id == request_id)
+            return session.scalars(stmt).first()
+
+    def get_generation_record(self, request_id: str) -> GenerationRecord | None:
+        with self.session() as session:
+            stmt = select(GenerationRecord).where(GenerationRecord.request_id == request_id)
+            return session.scalars(stmt).first()
 
     def _ensure_sqlite_parent_dir(self) -> None:
         url = make_url(self._dsn)

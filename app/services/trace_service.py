@@ -5,7 +5,17 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
+from app.persistence.models import GenerationRecord, IntentRecord, RequestTrace, RetrievalRecord, TraceStep
 from app.persistence.trace_store import SQLTraceStore
+from app.schemas.traces import (
+    TraceDetail,
+    TraceGenerationRecord,
+    TraceIntentRecord,
+    TraceListResponse,
+    TraceRetrievalRecord,
+    TraceStepItem,
+    TraceSummary,
+)
 
 
 @dataclass
@@ -127,6 +137,38 @@ class TraceService:
 
     def count_request_traces(self) -> int:
         return self._store.count_request_traces()
+
+    def list_traces(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        session_id: str | None = None,
+        status: str | None = None,
+    ) -> TraceListResponse:
+        offset = (page - 1) * page_size
+        traces, total = self._store.list_request_traces(
+            limit=page_size,
+            offset=offset,
+            session_id=session_id,
+            status=status,
+        )
+        items = [self._to_trace_summary(trace) for trace in traces]
+        return TraceListResponse(items=items, total=total, page=page, page_size=page_size)
+
+    def get_trace_detail(self, request_id: str) -> TraceDetail | None:
+        trace = self._store.get_request_trace(request_id)
+        if trace is None:
+            return None
+        intent_record = self._store.get_intent_record(request_id)
+        retrieval_record = self._store.get_retrieval_record(request_id)
+        generation_record = self._store.get_generation_record(request_id)
+        return self._to_trace_detail(
+            trace=trace,
+            intent_record=intent_record,
+            retrieval_record=retrieval_record,
+            generation_record=generation_record,
+        )
 
     @contextmanager
     def request_trace(self, session_id: str | None, user_input: str):
@@ -327,3 +369,105 @@ class TraceService:
     @staticmethod
     def _elapsed_ms(started_at: float) -> int:
         return int((perf_counter() - started_at) * 1000)
+
+    @staticmethod
+    def _to_trace_summary(trace: RequestTrace) -> TraceSummary:
+        return TraceSummary(
+            request_id=trace.request_id,
+            session_id=trace.session_id,
+            langsmith_trace_id=trace.langsmith_trace_id,
+            user_input=trace.user_input,
+            intent=trace.intent,
+            need_rag=trace.need_rag,
+            status=trace.status,
+            total_latency_ms=trace.total_latency_ms,
+            error_message=trace.error_message,
+            created_at=trace.created_at,
+            completed_at=trace.completed_at,
+            step_count=len(trace.steps),
+        )
+
+    @staticmethod
+    def _to_trace_detail(
+        trace: RequestTrace,
+        intent_record: IntentRecord | None,
+        retrieval_record: RetrievalRecord | None,
+        generation_record: GenerationRecord | None,
+    ) -> TraceDetail:
+        steps = sorted(trace.steps, key=lambda step: (step.step_order, step.created_at))
+        return TraceDetail(
+            request_id=trace.request_id,
+            session_id=trace.session_id,
+            langsmith_trace_id=trace.langsmith_trace_id,
+            user_input=trace.user_input,
+            intent=trace.intent,
+            need_rag=trace.need_rag,
+            final_output=trace.final_output,
+            status=trace.status,
+            total_latency_ms=trace.total_latency_ms,
+            error_message=trace.error_message,
+            created_at=trace.created_at,
+            completed_at=trace.completed_at,
+            step_count=len(steps),
+            steps=[TraceService._to_trace_step(step) for step in steps],
+            intent_record=TraceService._to_intent_record(intent_record),
+            retrieval_record=TraceService._to_retrieval_record(retrieval_record),
+            generation_record=TraceService._to_generation_record(generation_record),
+        )
+
+    @staticmethod
+    def _to_trace_step(step: TraceStep) -> TraceStepItem:
+        return TraceStepItem(
+            step_id=step.step_id,
+            request_id=step.request_id,
+            step_type=step.step_type,
+            step_order=step.step_order,
+            status=step.status,
+            latency_ms=step.latency_ms,
+            record_ref_type=step.record_ref_type,
+            record_ref_id=step.record_ref_id,
+            langsmith_run_id=step.langsmith_run_id,
+            error_message=step.error_message,
+            created_at=step.created_at,
+            completed_at=step.completed_at,
+        )
+
+    @staticmethod
+    def _to_intent_record(record: IntentRecord | None) -> TraceIntentRecord | None:
+        if record is None:
+            return None
+        return TraceIntentRecord(
+            intent_record_id=record.intent_record_id,
+            request_id=record.request_id,
+            input_text=record.input_text,
+            intent=record.intent,
+            need_rag=record.need_rag,
+            rewrite_query=record.rewrite_query,
+            model_output=record.model_output,
+            created_at=record.created_at,
+        )
+
+    @staticmethod
+    def _to_retrieval_record(record: RetrievalRecord | None) -> TraceRetrievalRecord | None:
+        if record is None:
+            return None
+        return TraceRetrievalRecord(
+            retrieval_record_id=record.retrieval_record_id,
+            request_id=record.request_id,
+            query=record.query,
+            retrieved_ids=record.retrieved_ids,
+            created_at=record.created_at,
+        )
+
+    @staticmethod
+    def _to_generation_record(record: GenerationRecord | None) -> TraceGenerationRecord | None:
+        if record is None:
+            return None
+        return TraceGenerationRecord(
+            generation_record_id=record.generation_record_id,
+            request_id=record.request_id,
+            user_input=record.user_input,
+            used_source_ids=record.used_source_ids,
+            llm_output=record.llm_output,
+            created_at=record.created_at,
+        )
