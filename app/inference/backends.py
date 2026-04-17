@@ -645,6 +645,22 @@ def _rule_based_intent_decision(messages: list[ChatMessage]) -> IntentDecision |
             rationale="命中上下文追问规则，判定为 follow_up。",
         )
 
+    if _matches_task_rule(latest_user_message):
+        return IntentDecision(
+            intent="task",
+            need_rag=False,
+            rewrite_query=latest_user_message,
+            rationale="命中任务执行规则，判定为 task。",
+        )
+
+    if _matches_knowledge_rule(latest_user_message):
+        return IntentDecision(
+            intent="knowledge_qa",
+            need_rag=True,
+            rewrite_query=_normalize_knowledge_query(latest_user_message),
+            rationale="命中知识问答规则，判定为 knowledge_qa。",
+        )
+
     return None
 
 
@@ -678,7 +694,7 @@ def _matches_reject_rule(text: str) -> bool:
 
 def _matches_chat_rule(text: str) -> bool:
     normalized = text.strip().lower()
-    if len(normalized) > 20:
+    if len(normalized) > 30:
         return False
 
     chat_patterns = (
@@ -686,6 +702,7 @@ def _matches_chat_rule(text: str) -> bool:
         r"^(谢谢|感谢|辛苦了|多谢)[！!。,.，]*$",
         r"^(再见|拜拜|晚安)[！!。,.，]*$",
         r"^你(是谁|能做什么).*$",
+        r"^你.*(能帮我做什么|可以帮我做什么|都能做什么).*$",
     )
     return any(re.match(pattern, normalized) for pattern in chat_patterns)
 
@@ -693,6 +710,9 @@ def _matches_chat_rule(text: str) -> bool:
 def _should_route_to_task_or_qa(text: str) -> bool:
     normalized = text.strip().lower()
     if not normalized:
+        return False
+
+    if _matches_chat_rule(text) or _matches_task_rule(text) or _matches_knowledge_rule(text):
         return False
 
     task_keywords = (
@@ -731,6 +751,42 @@ def _should_route_to_task_or_qa(text: str) -> bool:
     )
     return any(keyword in normalized for keyword in task_keywords) or any(
         keyword in normalized for keyword in qa_keywords
+    )
+
+
+def _matches_task_rule(text: str) -> bool:
+    normalized = text.strip()
+    task_patterns = (
+        r"^帮我(写|生成|整理|总结|改写|翻译|列出|制定|设计|规划).+",
+        r"^请(帮我)?(写|生成|整理|总结|改写|翻译|列出|制定|设计|规划).+",
+        r"^把.+(列出来|整理出来|总结出来|改写成).+",
+        r"^请生成.+(提纲|模板|计划|方案).+",
+        r"^帮我写.+",
+        r"^帮我把.+",
+    )
+    return any(re.match(pattern, normalized) for pattern in task_patterns)
+
+
+def _matches_knowledge_rule(text: str) -> bool:
+    normalized = text.strip()
+    knowledge_patterns = (
+        r"^.+(是什么|是做什么用的|有哪些|怎么配|放哪|放哪里|如何配置|怎么启动|部署方式).*$",
+        r"^配置文件里.+应该填什么.*$",
+        r"^.+接口.*(有哪些|是什么).*$",
+        r"^Qdrant.+做什么用.*$",
+    )
+    knowledge_keywords = (
+        "部署方式",
+        "配置文件",
+        "接口",
+        "Qdrant",
+        "怎么启动",
+        "如何配置",
+        "参数",
+        "说明文档",
+    )
+    return any(keyword in normalized for keyword in knowledge_keywords) or any(
+        re.match(pattern, normalized) for pattern in knowledge_patterns
     )
 
 
@@ -786,7 +842,6 @@ def _follow_up_needs_rag(expanded_query: str, messages: list[ChatMessage]) -> bo
         "接口",
         "启动",
         "参数",
-        "项目",
         "qdrant",
         "docker",
         "windows",
