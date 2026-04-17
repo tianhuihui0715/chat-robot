@@ -223,6 +223,15 @@ class LocalHFIntentBackend:
         if rule_decision is not None:
             return rule_decision, rule_decision.model_dump_json(ensure_ascii=False)
 
+        latest_user_message = next(
+            (message.content for message in reversed(request.messages) if message.role == "user"),
+            "",
+        ).strip()
+        if _should_route_to_task_or_qa(latest_user_message):
+            binary_decision, raw_output = await self._decide_task_or_qa(request.messages)
+            if binary_decision is not None:
+                return binary_decision, raw_output
+
         async with self._load_lock:
             await self._ensure_loaded()
 
@@ -240,6 +249,50 @@ class LocalHFIntentBackend:
 
         cleaned_output = _sanitize_output(raw_output)
         decision = _parse_intent_decision(cleaned_output, request.messages)
+        return decision, cleaned_output
+
+    async def _decide_task_or_qa(
+        self,
+        messages: list[ChatMessage],
+    ) -> tuple[IntentDecision | None, str]:
+        async with self._load_lock:
+            await self._ensure_loaded()
+
+            if self._model is None or self._tokenizer is None or self._torch is None:
+                raise RuntimeError("LocalHFIntentBackend failed to load the intent model.")
+
+            raw_output = _generate_chat_completion(
+                tokenizer=self._tokenizer,
+                model=self._model,
+                torch_module=self._torch,
+                chat_messages=_build_task_or_qa_messages(messages),
+                max_input_tokens=self._max_input_tokens,
+                max_new_tokens=16,
+            )
+
+        cleaned_output = _sanitize_output(raw_output)
+        label = _parse_task_or_qa_label(cleaned_output)
+        if label is None:
+            return None, cleaned_output
+
+        latest_user_message = next(
+            (message.content for message in reversed(messages) if message.role == "user"),
+            "",
+        ).strip()
+        if label == "task":
+            decision = IntentDecision(
+                intent="task",
+                need_rag=False,
+                rewrite_query=latest_user_message,
+                rationale="规则粗筛后由模型二分类判定为 task。",
+            )
+        else:
+            decision = IntentDecision(
+                intent="knowledge_qa",
+                need_rag=True,
+                rewrite_query=_normalize_knowledge_query(latest_user_message),
+                rationale="规则粗筛后由模型二分类判定为 knowledge_qa。",
+            )
         return decision, cleaned_output
 
     async def _ensure_loaded(self) -> None:
@@ -637,6 +690,50 @@ def _matches_chat_rule(text: str) -> bool:
     return any(re.match(pattern, normalized) for pattern in chat_patterns)
 
 
+def _should_route_to_task_or_qa(text: str) -> bool:
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+
+    task_keywords = (
+        "帮我",
+        "请帮我",
+        "生成",
+        "写一个",
+        "写一份",
+        "写个",
+        "改写",
+        "整理",
+        "总结",
+        "翻译",
+        "列出",
+        "制定",
+        "设计",
+        "规划",
+        "提纲",
+        "模板",
+    )
+    qa_keywords = (
+        "什么",
+        "怎么",
+        "为什么",
+        "哪里",
+        "多少",
+        "区别",
+        "作用",
+        "方式",
+        "配置",
+        "接口",
+        "部署",
+        "文档",
+        "说明",
+        "参数",
+    )
+    return any(keyword in normalized for keyword in task_keywords) or any(
+        keyword in normalized for keyword in qa_keywords
+    )
+
+
 def _looks_like_follow_up_by_rules(messages: list[ChatMessage]) -> bool:
     latest_user_message = next(
         (message.content for message in reversed(messages) if message.role == "user"),
@@ -703,3 +800,42 @@ def _follow_up_needs_rag(expanded_query: str, messages: list[ChatMessage]) -> bo
 
     haystack = f"{expanded_query}\n{previous_user}".lower()
     return any(keyword in haystack for keyword in rag_keywords)
+
+
+def _build_task_or_qa_messages(messages: list[ChatMessage]) -> list[dict[str, str]]:
+    latest_user_message = next(
+        (message.content for message in reversed(messages) if message.role == "user"),
+        "",
+    ).strip()
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是意图判断器，仅输出 task 或 knowledge_qa。\n"
+                "task：要求你产出结果、编写内容、整理结构或执行任务。\n"
+                "knowledge_qa：只是在询问信息、解释、配置、步骤或事实。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "示例1：帮我写一个 FastAPI 健康检查接口。\n输出：task\n\n"
+                "示例2：这个项目的部署方式是什么？\n输出：knowledge_qa\n\n"
+                f"用户输入：{latest_user_message}\n输出："
+            ),
+        },
+    ]
+
+
+def _parse_task_or_qa_label(text: str) -> str | None:
+    normalized = text.strip().lower()
+    if "knowledge_qa" in normalized:
+        return "knowledge_qa"
+    if re.search(r"\btask\b", normalized):
+        return "task"
+    return None
+
+
+def _normalize_knowledge_query(text: str) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    return compact or text
