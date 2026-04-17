@@ -4,6 +4,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
 
 $cases = @(
     @{
@@ -227,4 +229,3 @@ Write-Host "Intent pass count   : $intentPassCount"
 Write-Host "need_rag pass count : $needRagPassCount"
 Write-Host "All-pass count      : $allPassCount"
 Write-Host "====================" -ForegroundColor Cyan
-

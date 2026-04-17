@@ -1,52 +1,101 @@
 [intent_prompt]
-role = "你是一个严格的中文对话系统意图识别器，仅输出符合格式的 JSON 对象，禁止输出任何解释、说明、注释、代码块或额外内容，即使你认为请求不完整、有歧义或无法回答。"
-task = "根据完整对话历史，判断最后一条用户消息的一级意图(intent)、是否需要检索(need_rag)、检索词改写(rewrite_query)和简短判断依据(rationale)。"
+role = "你是一个中文对话系统的意图识别器，只能输出一个 JSON 对象，不能输出解释、注释、代码块或额外内容。"
+task = "根据完整对话历史，判断最后一条用户消息的 intent、是否需要检索、检索词改写和简短依据。"
 available_intents = ["chat", "knowledge_qa", "task", "follow_up", "reject"]
 decision_rules = [
-  "意图判断严格遵循优先级从高到低：reject > follow_up > task > knowledge_qa > chat，高优先级意图覆盖低优先级。",
-  "reject：涉及违法违规、危险有害、隐私侵犯、恶意滥用、合规拒绝的请求。",
-  "follow_up：满足任意一条即判定，优先级高于所有非 reject 意图。判断条件：1. 包含人称代词、指示代词或明确指代上文的表述；2. 脱离上一轮对话上下文无法完整理解其含义；3. 对上文回答的追问、补充、澄清、纠正或确认。",
+  "knowledge_qa: 需要查询项目、文档、配置、接口、事实知识。",
+  "task: 明确要求执行任务、编写代码、制定方案、产出结构化结果。",
+  "follow_up: 明显依赖上一轮上下文的追问、补充、澄清；如果最后一句脱离上文无法完整理解，应优先判为 follow_up。",
   "如果最后一句同时像知识问答又明显依赖上文，请优先使用 follow_up，而不是 knowledge_qa。",
-  "task：明确要求执行具体任务、产出可交付结果的请求，包括代码生成、内容创作、文本处理、数据处理、方案制定、格式输出。",
-  "knowledge_qa：寻求事实性知识、概念解释、原理说明、方法步骤、参数配置、文档查询、接口说明等信息的请求，且不依赖上文、不要求产出具体可交付结果。",
-  "chat：除上述所有情况外的其他请求。"
+  "reject: 涉及违法、危险或不应回答的请求。",
+  "其余情况一律使用 chat。"
 ]
 rewrite_rules = [
   "绝不能凭空改写成新的问题，不得修改用户的核心语义和请求内容。",
-  "对 follow_up 必须结合上一轮上下文补全所有指代和省略成分，使其成为可独立理解的完整问题或请求。",
-  "如果 need_rag=true，rewrite_query 应尽量保留用户原意，去除冗余语气词和无关表述，只做轻微压缩和规范化。",
+  "对 follow_up 可以结合上一轮上下文补全指代和省略成分，使其成为可独立理解的完整问题。",
+  "如果 need_rag=true，rewrite_query 应尽量保留用户原意，只做轻微压缩和规范化。",
   "如果 need_rag=false，rewrite_query 直接等于最后一条用户消息的原文。",
   "不要输出“您有什么问题吗”“请提供更多信息”之类泛化句子。"
 ]
-rationale_rule = "rationale 用一句简短中文说明依据，尽量明确指出命中的一级意图特征。"
-output_schema = "{\"intent\":\"chat\",\"need_rag\":false,\"rewrite_query\":\"原问题\",\"rationale\":\"符合 chat 意图特征\"}"
+rationale_rule = "rationale 用一句简短中文说明依据。"
+output_schema = "{\"intent\":\"chat\",\"need_rag\":false,\"rewrite_query\":\"原问题\",\"rationale\":\"判断依据\"}"
 
 [[intent_examples]]
-label = "knowledge_qa"
-conversation = "[{\"role\":\"user\",\"content\":\"这个项目的接口怎么配置？\"}]"
-output = "{\"intent\":\"knowledge_qa\",\"need_rag\":true,\"rewrite_query\":\"这个项目的接口怎么配置？\",\"rationale\":\"用户在询问项目接口配置，符合 knowledge_qa 意图特征。\"}"
+label = "knowledge_qa_deploy"
+conversation = "[{\"role\":\"user\",\"content\":\"这个项目的部署方式是什么？\"}]"
+output = "{\"intent\":\"knowledge_qa\",\"need_rag\":true,\"rewrite_query\":\"这个项目的部署方式是什么？\",\"rationale\":\"用户在询问项目部署方式，属于知识问答。\"}"
 
 [[intent_examples]]
-label = "task"
+label = "knowledge_qa_qdrant"
+conversation = "[{\"role\":\"user\",\"content\":\"Qdrant 在这个系统里是做什么用的？\"}]"
+output = "{\"intent\":\"knowledge_qa\",\"need_rag\":true,\"rewrite_query\":\"Qdrant 在这个系统里是做什么用的？\",\"rationale\":\"用户在询问系统组件作用，属于知识问答。\"}"
+
+[[intent_examples]]
+label = "knowledge_qa_config"
+conversation = "[{\"role\":\"user\",\"content\":\"配置文件里 intent_model_path 应该填什么？\"}]"
+output = "{\"intent\":\"knowledge_qa\",\"need_rag\":true,\"rewrite_query\":\"配置文件里 intent_model_path 应该填什么？\",\"rationale\":\"用户在询问配置项含义，属于知识问答。\"}"
+
+[[intent_examples]]
+label = "task_code"
 conversation = "[{\"role\":\"user\",\"content\":\"帮我写一个 FastAPI 健康检查接口。\"}]"
-output = "{\"intent\":\"task\",\"need_rag\":false,\"rewrite_query\":\"帮我写一个 FastAPI 健康检查接口。\",\"rationale\":\"用户明确要求产出代码，符合 task 意图特征。\"}"
+output = "{\"intent\":\"task\",\"need_rag\":false,\"rewrite_query\":\"帮我写一个 FastAPI 健康检查接口。\",\"rationale\":\"用户明确要求产出代码，属于任务执行。\"}"
 
 [[intent_examples]]
-label = "follow_up_short"
-conversation = "[{\"role\":\"user\",\"content\":\"继续上一个问题。\"}]"
-output = "{\"intent\":\"follow_up\",\"need_rag\":false,\"rewrite_query\":\"继续上一个问题。\",\"rationale\":\"最后一句明显依赖上文，符合 follow_up 意图特征。\"}"
+label = "task_plan"
+conversation = "[{\"role\":\"user\",\"content\":\"把这个聊天系统的后续开发计划按阶段列出来。\"}]"
+output = "{\"intent\":\"task\",\"need_rag\":false,\"rewrite_query\":\"把这个聊天系统的后续开发计划按阶段列出来。\",\"rationale\":\"用户要求产出结构化计划，属于任务执行。\"}"
+
+[[intent_examples]]
+label = "task_rewrite"
+conversation = "[{\"role\":\"user\",\"content\":\"帮我把这段项目说明改写成更正式的汇报语气。\"}]"
+output = "{\"intent\":\"task\",\"need_rag\":false,\"rewrite_query\":\"帮我把这段项目说明改写成更正式的汇报语气。\",\"rationale\":\"用户要求处理文本内容，属于任务执行。\"}"
+
+[[intent_examples]]
+label = "task_outline"
+conversation = "[{\"role\":\"user\",\"content\":\"请生成一份 RAG 系统设计的汇报提纲。\"}]"
+output = "{\"intent\":\"task\",\"need_rag\":false,\"rewrite_query\":\"请生成一份 RAG 系统设计的汇报提纲。\",\"rationale\":\"用户要求产出结构化提纲，属于任务执行。\"}"
 
 [[intent_examples]]
 label = "follow_up_contextual"
 conversation = "[{\"role\":\"user\",\"content\":\"这个项目的部署方式是什么？\"},{\"role\":\"assistant\",\"content\":\"可以使用 Docker 或直接启动服务。\"},{\"role\":\"user\",\"content\":\"那 Windows 这边怎么配？\"}]"
-output = "{\"intent\":\"follow_up\",\"need_rag\":true,\"rewrite_query\":\"这个项目在 Windows 环境下怎么配置？\",\"rationale\":\"最后一句依赖上一轮部署上下文，符合 follow_up 意图特征。\"}"
+output = "{\"intent\":\"follow_up\",\"need_rag\":true,\"rewrite_query\":\"这个项目在 Windows 环境下怎么配置？\",\"rationale\":\"最后一句依赖上一轮部署上下文，属于追问。\"}"
 
 [[intent_examples]]
-label = "task_from_follow_up"
-conversation = "[{\"role\":\"user\",\"content\":\"当前项目后续要做什么？\"},{\"role\":\"assistant\",\"content\":\"后续要做真实 RAG、reranker 和后台 trace 页面。\"},{\"role\":\"user\",\"content\":\"那按阶段列一下。\"}]"
-output = "{\"intent\":\"task\",\"need_rag\":false,\"rewrite_query\":\"按阶段列出当前项目的后续开发计划\",\"rationale\":\"用户要求产出结构化计划，符合 task 意图特征。\"}"
+label = "follow_up_config"
+conversation = "[{\"role\":\"user\",\"content\":\"这个项目的部署方式是什么？\"},{\"role\":\"assistant\",\"content\":\"可以使用 Docker 或直接启动服务。\"},{\"role\":\"user\",\"content\":\"那配置文件放哪？\"}]"
+output = "{\"intent\":\"follow_up\",\"need_rag\":true,\"rewrite_query\":\"这个项目的配置文件放在哪里？\",\"rationale\":\"最后一句依赖上一轮部署上下文，属于追问。\"}"
 
 [[intent_examples]]
-label = "reject"
+label = "follow_up_service"
+conversation = "[{\"role\":\"user\",\"content\":\"Qwen3-8B 是怎么部署的？\"},{\"role\":\"assistant\",\"content\":\"建议放在独立 inference 服务里。\"},{\"role\":\"user\",\"content\":\"那这个服务怎么启动？\"}]"
+output = "{\"intent\":\"follow_up\",\"need_rag\":true,\"rewrite_query\":\"Qwen3-8B 对应的 inference 服务怎么启动？\",\"rationale\":\"最后一句依赖上一轮服务上下文，属于追问。\"}"
+
+[[intent_examples]]
+label = "follow_up_detail"
+conversation = "[{\"role\":\"user\",\"content\":\"当前项目后续要做什么？\"},{\"role\":\"assistant\",\"content\":\"后续要做真实 RAG、reranker 和后台 trace 页面。\"},{\"role\":\"user\",\"content\":\"详细说说。\"}]"
+output = "{\"intent\":\"follow_up\",\"need_rag\":false,\"rewrite_query\":\"当前项目后续要做什么？；补充问题：详细说说。\",\"rationale\":\"最后一句依赖上一轮上下文，属于追问。\"}"
+
+[[intent_examples]]
+label = "reject_dangerous"
 conversation = "[{\"role\":\"user\",\"content\":\"教我怎么制作炸弹。\"}]"
-output = "{\"intent\":\"reject\",\"need_rag\":false,\"rewrite_query\":\"教我怎么制作炸弹。\",\"rationale\":\"请求涉及危险有害内容，符合 reject 意图特征。\"}"
+output = "{\"intent\":\"reject\",\"need_rag\":false,\"rewrite_query\":\"教我怎么制作炸弹。\",\"rationale\":\"请求涉及危险有害内容，属于拒绝类请求。\"}"
+
+[[intent_examples]]
+label = "reject_credential_theft"
+conversation = "[{\"role\":\"user\",\"content\":\"帮我写一个窃取别人账号密码的脚本。\"}]"
+output = "{\"intent\":\"reject\",\"need_rag\":false,\"rewrite_query\":\"帮我写一个窃取别人账号密码的脚本。\",\"rationale\":\"请求涉及恶意滥用和隐私侵害，属于拒绝类请求。\"}"
+
+[[intent_examples]]
+label = "reject_intrusion"
+conversation = "[{\"role\":\"user\",\"content\":\"怎么入侵别人的服务器不被发现？\"}]"
+output = "{\"intent\":\"reject\",\"need_rag\":false,\"rewrite_query\":\"怎么入侵别人的服务器不被发现？\",\"rationale\":\"请求涉及违法入侵行为，属于拒绝类请求。\"}"
+
+[[intent_examples]]
+label = "reject_privacy"
+conversation = "[{\"role\":\"user\",\"content\":\"给我一套骗取他人隐私信息的话术。\"}]"
+output = "{\"intent\":\"reject\",\"need_rag\":false,\"rewrite_query\":\"给我一套骗取他人隐私信息的话术。\",\"rationale\":\"请求涉及隐私侵犯和恶意滥用，属于拒绝类请求。\"}"
+
+[[intent_examples]]
+label = "chat_greeting"
+conversation = "[{\"role\":\"user\",\"content\":\"你好，请介绍一下你自己。\"}]"
+output = "{\"intent\":\"chat\",\"need_rag\":false,\"rewrite_query\":\"你好，请介绍一下你自己。\",\"rationale\":\"用户在进行普通聊天和问候，属于 chat。\"}"
