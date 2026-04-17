@@ -47,6 +47,14 @@ def build_inference_container(settings: Settings) -> InferenceContainer:
         intent_backend: IntentInferenceBackend = LocalHFIntentBackend(
             model_path=settings.intent_model_path,
             max_input_tokens=settings.llm_max_input_tokens,
+            prompt_role=settings.intent_prompt_role,
+            prompt_task=settings.intent_prompt_task,
+            available_intents=settings.intent_prompt_available_intents,
+            decision_rules=settings.intent_prompt_decision_rules,
+            rewrite_rules=settings.intent_prompt_rewrite_rules,
+            rationale_rule=settings.intent_prompt_rationale_rule,
+            output_schema=settings.intent_prompt_output_schema,
+            examples=settings.intent_prompt_examples,
         )
     else:
         generation_backend = MockInferenceBackend()

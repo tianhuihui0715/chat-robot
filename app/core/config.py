@@ -18,6 +18,7 @@ CONFIG_FILES = (
     CONFIG_DIR / "app.toml",
     CONFIG_DIR / "models.toml",
     CONFIG_DIR / "rag.toml",
+    CONFIG_DIR / "intents.toml",
 )
 
 ENV_MAPPING = {
@@ -91,6 +92,35 @@ class Settings(BaseModel):
     langsmith_project: str = "chat-robot"
     langsmith_endpoint: str = "https://api.smith.langchain.com"
     langsmith_api_key: str | None = None
+    intent_prompt_role: str = "你是一个中文对话系统的意图识别器，只能输出一个 JSON 对象，不能输出解释。"
+    intent_prompt_task: str = "根据完整对话历史，判断最后一条用户消息的 intent、是否需要检索、检索词改写和简短依据。"
+    intent_prompt_available_intents: list[str] = [
+        "chat",
+        "knowledge_qa",
+        "task",
+        "follow_up",
+        "reject",
+    ]
+    intent_prompt_decision_rules: list[str] = [
+        "knowledge_qa: 需要查询项目、文档、配置、接口、事实知识。",
+        "task: 明确要求执行任务、编写代码、制定方案、产出结构化结果。",
+        "follow_up: 明显依赖上一轮上下文的追问、补充、澄清；如果脱离上文无法完整理解，应优先判为 follow_up。",
+        "如果最后一句同时像知识问答又明显依赖上文，请优先使用 follow_up，而不是 knowledge_qa。",
+        "reject: 涉及违法、危险或不应回答的请求。",
+        "其余情况一律使用 chat。",
+    ]
+    intent_prompt_rewrite_rules: list[str] = [
+        "绝不能凭空改写成新的问题。",
+        "对 follow_up 允许结合上一轮上下文补全主语，使其变成可独立理解的完整问题。",
+        "如果 need_rag=true，rewrite_query 应尽量保留用户原意，只做轻微压缩和规范化。",
+        "如果 need_rag=false，rewrite_query 直接等于最后一条用户消息。",
+        "不要输出“您有什么问题吗”“请提供更多信息”之类泛化句子。",
+    ]
+    intent_prompt_rationale_rule: str = "rationale 用一句简短中文说明依据。"
+    intent_prompt_output_schema: str = (
+        '{"intent":"chat","need_rag":false,"rewrite_query":"原问题","rationale":"判断依据"}'
+    )
+    intent_prompt_examples: list[dict[str, str]] = []
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -146,6 +176,19 @@ def _load_config_defaults() -> dict[str, Any]:
                 {
                     "rag_top_k": data.get("rag", {}).get("top_k"),
                     "rag_score_threshold": data.get("rag", {}).get("score_threshold"),
+                }
+            )
+        elif path.name == "intents.toml":
+            merged.update(
+                {
+                    "intent_prompt_role": data.get("intent_prompt", {}).get("role"),
+                    "intent_prompt_task": data.get("intent_prompt", {}).get("task"),
+                    "intent_prompt_available_intents": data.get("intent_prompt", {}).get("available_intents"),
+                    "intent_prompt_decision_rules": data.get("intent_prompt", {}).get("decision_rules"),
+                    "intent_prompt_rewrite_rules": data.get("intent_prompt", {}).get("rewrite_rules"),
+                    "intent_prompt_rationale_rule": data.get("intent_prompt", {}).get("rationale_rule"),
+                    "intent_prompt_output_schema": data.get("intent_prompt", {}).get("output_schema"),
+                    "intent_prompt_examples": data.get("intent_examples"),
                 }
             )
     return {key: value for key, value in merged.items() if value is not None}

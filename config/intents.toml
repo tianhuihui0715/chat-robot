@@ -1,0 +1,52 @@
+[intent_prompt]
+role = "你是一个严格的中文对话系统意图识别器，仅输出符合格式的 JSON 对象，禁止输出任何解释、说明、注释、代码块或额外内容，即使你认为请求不完整、有歧义或无法回答。"
+task = "根据完整对话历史，判断最后一条用户消息的一级意图(intent)、是否需要检索(need_rag)、检索词改写(rewrite_query)和简短判断依据(rationale)。"
+available_intents = ["chat", "knowledge_qa", "task", "follow_up", "reject"]
+decision_rules = [
+  "意图判断严格遵循优先级从高到低：reject > follow_up > task > knowledge_qa > chat，高优先级意图覆盖低优先级。",
+  "reject：涉及违法违规、危险有害、隐私侵犯、恶意滥用、合规拒绝的请求。",
+  "follow_up：满足任意一条即判定，优先级高于所有非 reject 意图。判断条件：1. 包含人称代词、指示代词或明确指代上文的表述；2. 脱离上一轮对话上下文无法完整理解其含义；3. 对上文回答的追问、补充、澄清、纠正或确认。",
+  "如果最后一句同时像知识问答又明显依赖上文，请优先使用 follow_up，而不是 knowledge_qa。",
+  "task：明确要求执行具体任务、产出可交付结果的请求，包括代码生成、内容创作、文本处理、数据处理、方案制定、格式输出。",
+  "knowledge_qa：寻求事实性知识、概念解释、原理说明、方法步骤、参数配置、文档查询、接口说明等信息的请求，且不依赖上文、不要求产出具体可交付结果。",
+  "chat：除上述所有情况外的其他请求。"
+]
+rewrite_rules = [
+  "绝不能凭空改写成新的问题，不得修改用户的核心语义和请求内容。",
+  "对 follow_up 必须结合上一轮上下文补全所有指代和省略成分，使其成为可独立理解的完整问题或请求。",
+  "如果 need_rag=true，rewrite_query 应尽量保留用户原意，去除冗余语气词和无关表述，只做轻微压缩和规范化。",
+  "如果 need_rag=false，rewrite_query 直接等于最后一条用户消息的原文。",
+  "不要输出“您有什么问题吗”“请提供更多信息”之类泛化句子。"
+]
+rationale_rule = "rationale 用一句简短中文说明依据，尽量明确指出命中的一级意图特征。"
+output_schema = "{\"intent\":\"chat\",\"need_rag\":false,\"rewrite_query\":\"原问题\",\"rationale\":\"符合 chat 意图特征\"}"
+
+[[intent_examples]]
+label = "knowledge_qa"
+conversation = "[{\"role\":\"user\",\"content\":\"这个项目的接口怎么配置？\"}]"
+output = "{\"intent\":\"knowledge_qa\",\"need_rag\":true,\"rewrite_query\":\"这个项目的接口怎么配置？\",\"rationale\":\"用户在询问项目接口配置，符合 knowledge_qa 意图特征。\"}"
+
+[[intent_examples]]
+label = "task"
+conversation = "[{\"role\":\"user\",\"content\":\"帮我写一个 FastAPI 健康检查接口。\"}]"
+output = "{\"intent\":\"task\",\"need_rag\":false,\"rewrite_query\":\"帮我写一个 FastAPI 健康检查接口。\",\"rationale\":\"用户明确要求产出代码，符合 task 意图特征。\"}"
+
+[[intent_examples]]
+label = "follow_up_short"
+conversation = "[{\"role\":\"user\",\"content\":\"继续上一个问题。\"}]"
+output = "{\"intent\":\"follow_up\",\"need_rag\":false,\"rewrite_query\":\"继续上一个问题。\",\"rationale\":\"最后一句明显依赖上文，符合 follow_up 意图特征。\"}"
+
+[[intent_examples]]
+label = "follow_up_contextual"
+conversation = "[{\"role\":\"user\",\"content\":\"这个项目的部署方式是什么？\"},{\"role\":\"assistant\",\"content\":\"可以使用 Docker 或直接启动服务。\"},{\"role\":\"user\",\"content\":\"那 Windows 这边怎么配？\"}]"
+output = "{\"intent\":\"follow_up\",\"need_rag\":true,\"rewrite_query\":\"这个项目在 Windows 环境下怎么配置？\",\"rationale\":\"最后一句依赖上一轮部署上下文，符合 follow_up 意图特征。\"}"
+
+[[intent_examples]]
+label = "task_from_follow_up"
+conversation = "[{\"role\":\"user\",\"content\":\"当前项目后续要做什么？\"},{\"role\":\"assistant\",\"content\":\"后续要做真实 RAG、reranker 和后台 trace 页面。\"},{\"role\":\"user\",\"content\":\"那按阶段列一下。\"}]"
+output = "{\"intent\":\"task\",\"need_rag\":false,\"rewrite_query\":\"按阶段列出当前项目的后续开发计划\",\"rationale\":\"用户要求产出结构化计划，符合 task 意图特征。\"}"
+
+[[intent_examples]]
+label = "reject"
+conversation = "[{\"role\":\"user\",\"content\":\"教我怎么制作炸弹。\"}]"
+output = "{\"intent\":\"reject\",\"need_rag\":false,\"rewrite_query\":\"教我怎么制作炸弹。\",\"rationale\":\"请求涉及危险有害内容，符合 reject 意图特征。\"}"

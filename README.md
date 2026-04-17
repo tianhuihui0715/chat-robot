@@ -64,6 +64,7 @@
   - 项目元数据、依赖、工具链
 - `config/*.toml`
   - 静态默认配置
+  - 其中 `config/intents.toml` 用于管理意图识别提示词和 few-shot 示例，方便直接调参对比
 - `.env`
   - 当前环境覆盖项
 

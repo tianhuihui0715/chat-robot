@@ -177,11 +177,27 @@ class LocalHFIntentBackend:
         self,
         model_path: str,
         max_input_tokens: int,
+        prompt_role: str,
+        prompt_task: str,
+        available_intents: list[str],
+        decision_rules: list[str],
+        rewrite_rules: list[str],
+        rationale_rule: str,
+        output_schema: str,
+        examples: list[dict[str, str]],
         max_new_tokens: int = 256,
     ) -> None:
         self._model_path = model_path
         self._max_input_tokens = max_input_tokens
         self._max_new_tokens = max_new_tokens
+        self._prompt_role = prompt_role
+        self._prompt_task = prompt_task
+        self._available_intents = available_intents
+        self._decision_rules = decision_rules
+        self._rewrite_rules = rewrite_rules
+        self._rationale_rule = rationale_rule
+        self._output_schema = output_schema
+        self._examples = examples
         self._tokenizer = None
         self._model = None
         self._torch = None
@@ -196,8 +212,6 @@ class LocalHFIntentBackend:
         return self._model is not None and self._tokenizer is not None
 
     async def start(self) -> None:
-        # Intent model stays off the GPU and off the startup path.
-        # It is loaded to CPU lazily on the first /intent request.
         return None
 
     async def stop(self) -> None:
@@ -235,68 +249,48 @@ class LocalHFIntentBackend:
         self._model = None
         self._torch = None
 
-    @staticmethod
-    def _build_chat_messages(messages: list[ChatMessage]) -> list[dict[str, str]]:
-        system_prompt = (
-            "你是一个中文对话系统的意图识别器，只能输出一个 JSON 对象，不能输出解释。\n"
-            "任务：根据完整对话历史，判断最后一条用户消息的 intent、是否需要检索、检索词改写和简短依据。\n"
-            "可选 intent 只有：chat, knowledge_qa, task, follow_up, reject。\n"
-            "判断规则：\n"
-            "- knowledge_qa: 需要查询项目、文档、配置、接口、事实知识。\n"
-            "- task: 明确要求执行任务、编写代码、制定方案、产出结构化结果。\n"
-            "- follow_up: 明显依赖上一轮上下文的追问、补充、澄清；如果脱离上文无法完整理解，应优先判为 follow_up。\n"
-            "- 如果最后一句同时像知识问答又明显依赖上文，请优先使用 follow_up，而不是 knowledge_qa。\n"
-            "- reject: 涉及违法、危险或不应回答的请求。\n"
-            "- 其余情况一律使用 chat。\n"
-            "rewrite_query 规则：\n"
-            "- 绝不能凭空改写成新的问题。\n"
-            "- 对 follow_up 允许结合上一轮上下文补全主语，使其变成可独立理解的完整问题。\n"
-            "- 如果 need_rag=true，rewrite_query 应尽量保留用户原意，只做轻微压缩和规范化。\n"
-            "- 如果 need_rag=false，rewrite_query 直接等于最后一条用户消息。\n"
-            "- 不要输出“您有什么问题吗”“请提供更多信息”之类泛化句子。\n"
-            "rationale 用一句简短中文说明依据。\n"
-            "严格只输出 JSON，格式如下："
-            '{"intent":"chat","need_rag":false,"rewrite_query":"原问题","rationale":"判断依据"}'
-        )
-
-        examples = (
-            '示例1:\n'
-            '输入对话:\n'
-            '[{"role":"user","content":"这个项目的接口怎么配置？"}]\n'
-            '输出:\n'
-            '{"intent":"knowledge_qa","need_rag":true,"rewrite_query":"这个项目的接口怎么配置？","rationale":"用户在询问项目接口配置，属于知识问答。"}\n\n'
-            '示例2:\n'
-            '输入对话:\n'
-            '[{"role":"user","content":"帮我写一个 FastAPI 健康检查接口"}]\n'
-            '输出:\n'
-            '{"intent":"task","need_rag":false,"rewrite_query":"帮我写一个 FastAPI 健康检查接口","rationale":"用户明确要求产出代码，属于任务执行。"}\n\n'
-            '示例3:\n'
-            '输入对话:\n'
-            '[{"role":"user","content":"继续上一个问题"}]\n'
-            '输出:\n'
-            '{"intent":"follow_up","need_rag":false,"rewrite_query":"继续上一个问题","rationale":"用户在追问上一轮内容，属于 follow_up。"}\n\n'
-            '示例4:\n'
-            '输入对话:\n'
-            '[{"role":"user","content":"这个项目的部署方式是什么？"},{"role":"assistant","content":"可以使用 Docker 或直接启动服务。"},{"role":"user","content":"那 Windows 这边怎么配？"}]\n'
-            '输出:\n'
-            '{"intent":"follow_up","need_rag":true,"rewrite_query":"这个项目在 Windows 环境下怎么配置？","rationale":"最后一句依赖上一轮部署上下文，属于追问。"}\n\n'
-            '示例5:\n'
-            '输入对话:\n'
-            '[{"role":"user","content":"当前项目后续要做什么？"},{"role":"assistant","content":"后续要做真实 RAG、reranker 和后台 trace 页面。"},{"role":"user","content":"那按阶段列一下。"}]\n'
-            '输出:\n'
-            '{"intent":"task","need_rag":false,"rewrite_query":"按阶段列出当前项目的后续开发计划","rationale":"用户要求产出结构化计划，属于任务执行。"}'
-        )
-
+    def _build_chat_messages(self, messages: list[ChatMessage]) -> list[dict[str, str]]:
         chat_messages: list[dict[str, str]] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "system", "content": examples},
+            {"role": "system", "content": self._build_system_prompt()},
+        ]
+
+        examples_prompt = self._build_examples_prompt()
+        if examples_prompt:
+            chat_messages.append({"role": "system", "content": examples_prompt})
+
+        chat_messages.append(
             {
                 "role": "user",
                 "content": "请对下面的对话做意图识别，只返回 JSON。\n"
                 + _format_conversation(messages),
-            },
-        ]
+            }
+        )
         return chat_messages
+
+    def _build_system_prompt(self) -> str:
+        lines = [
+            self._prompt_role.strip(),
+            f"任务：{self._prompt_task.strip()}",
+            "可选 intent 只有：" + ", ".join(self._available_intents) + "。",
+            "判断规则：",
+        ]
+        lines.extend(f"- {rule.strip()}" for rule in self._decision_rules if rule.strip())
+        lines.append("rewrite_query 规则：")
+        lines.extend(f"- {rule.strip()}" for rule in self._rewrite_rules if rule.strip())
+        lines.append(self._rationale_rule.strip())
+        lines.append("严格只输出 JSON，格式如下：")
+        lines.append(self._output_schema.strip())
+        return "\n".join(lines)
+
+    def _build_examples_prompt(self) -> str:
+        sections: list[str] = []
+        for index, example in enumerate(self._examples, start=1):
+            conversation = example.get("conversation", "").strip()
+            output = example.get("output", "").strip()
+            if not conversation or not output:
+                continue
+            sections.append(f"示例{index}:\n输入对话:\n{conversation}\n输出:\n{output}")
+        return "\n\n".join(sections)
 
 
 def _load_quantized_model(model_path: str):
@@ -380,7 +374,7 @@ def _generate_chat_completion(
             do_sample=False,
             pad_token_id=tokenizer.eos_token_id,
         )
-    generated_tokens = outputs[0][input_ids.shape[1]:]
+    generated_tokens = outputs[0][input_ids.shape[1] :]
     return tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
 
 
