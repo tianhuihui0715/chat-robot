@@ -83,8 +83,9 @@ services:
       retries: 5
       start_period: 60s
 
+  # 国内镜像源：PostgreSQL (阿里云官方镜像)
   postgres:
-    image: postgres:17
+    image: docker.m.daocloud.io/library/postgres:17
     container_name: chat-robot-postgres
     restart: unless-stopped
     environment:
@@ -107,8 +108,9 @@ services:
       timeout: 5s
       retries: 5
 
+  # 国内镜像源：Qdrant (DaoCloud 镜像)
   qdrant:
-    image: qdrant/qdrant:latest
+    image: docker.m.daocloud.io/qdrant/qdrant:latest
     container_name: chat-robot-qdrant
     restart: unless-stopped
     environment:
@@ -134,8 +136,9 @@ services:
         reservations:
           memory: 2G
 
+  # 国内镜像源：MinIO (DaoCloud 镜像)
   minio:
-    image: minio/minio:latest
+    image: docker.m.daocloud.io/minio/minio:latest
     container_name: chat-robot-minio
     restart: unless-stopped
     environment:
