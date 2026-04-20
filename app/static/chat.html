@@ -14,7 +14,7 @@
           <p class="eyebrow">Chat Robot</p>
           <h1>本地对话控制台</h1>
           <p class="lede">
-            在一个页面里测试聊天链路、查看系统健康状态，并快速跳转到请求轨迹面板。
+            在一个页面里测试知识库导入、会话聊天、命中来源和系统健康状态，方便你快速联调整条链路。
           </p>
         </div>
         <div class="hero-card__actions">
@@ -42,6 +42,83 @@
         </article>
       </section>
 
+      <section class="panel-grid panel-grid--triple">
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Session</p>
+              <h2>会话配置</h2>
+            </div>
+          </div>
+          <form class="stack-form" id="session-form">
+            <label class="stack-form__label" for="session-id">Session ID</label>
+            <div class="inline-row">
+              <input id="session-id" name="session-id" type="text" placeholder="例如 demo-session-001" />
+              <button class="button button--ghost button--small" id="new-session" type="button">新会话</button>
+            </div>
+            <p class="hint" id="session-hint">留空时会自动生成一个会话标识，并在当前页面持续复用。</p>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Knowledge Base</p>
+              <h2>知识库导入</h2>
+            </div>
+          </div>
+          <form class="stack-form" id="knowledge-form">
+            <label class="stack-form__label" for="knowledge-files">上传文本文件</label>
+            <input id="knowledge-files" name="knowledge-files" type="file" accept=".txt,.md,.markdown,.json" multiple />
+            <label class="stack-form__label" for="knowledge-title">或手动录入标题</label>
+            <input id="knowledge-title" name="knowledge-title" type="text" placeholder="例如 部署说明" />
+            <label class="stack-form__label" for="knowledge-content">内容</label>
+            <textarea
+              id="knowledge-content"
+              name="knowledge-content"
+              rows="6"
+              placeholder="直接粘贴一段知识内容，点击导入即可入库。"
+            ></textarea>
+            <div class="composer__actions">
+              <span class="hint" id="knowledge-hint">支持多文件批量导入，当前调用 /api/v1/knowledge/ingest。</span>
+              <button class="button button--primary" id="knowledge-submit" type="submit">导入知识</button>
+            </div>
+          </form>
+          <div class="detail-card">
+            <div class="detail-card__title-row">
+              <h3>已入库文档</h3>
+              <button class="button button--ghost button--small" id="refresh-documents" type="button">刷新列表</button>
+            </div>
+            <div class="mini-list" id="document-list">
+              <div class="empty-state">还没有已入库文档。</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Infra</p>
+              <h2>基础服务</h2>
+            </div>
+          </div>
+          <dl class="definition-list">
+            <div>
+              <dt>PostgreSQL</dt>
+              <dd id="postgres-status">-</dd>
+            </div>
+            <div>
+              <dt>Qdrant</dt>
+              <dd id="qdrant-status">-</dd>
+            </div>
+            <div>
+              <dt>MinIO</dt>
+              <dd id="minio-status">-</dd>
+            </div>
+          </dl>
+        </section>
+      </section>
+
       <section class="panel-grid">
         <section class="panel panel--conversation">
           <div class="panel__header">
@@ -55,7 +132,7 @@
           <div class="chat-feed" id="chat-feed">
             <article class="bubble bubble--assistant">
               <span class="bubble__role">Assistant</span>
-              <p>你好，我已经准备好了。你可以直接在这里测试本地聊天链路。</p>
+              <p>你好，我已经准备好了。你可以先导入文档，再直接在这里测试检索和问答链路。</p>
             </article>
           </div>
 
@@ -65,14 +142,12 @@
               id="chat-input"
               name="chat-input"
               rows="4"
-              placeholder="例如：这个项目的接口怎么配置？"
+              placeholder="例如：这个项目的部署方式是什么？"
               required
             ></textarea>
             <div class="composer__actions">
               <span class="hint" id="chat-hint">接口目标：/api/v1/chat</span>
-              <button class="button button--primary" id="send-button" type="submit">
-                发送请求
-              </button>
+              <button class="button button--primary" id="send-button" type="submit">发送请求</button>
             </div>
           </form>
         </section>
@@ -107,6 +182,13 @@
           <div class="detail-card">
             <h3>意图依据</h3>
             <p id="intent-rationale">等待请求。</p>
+          </div>
+
+          <div class="detail-card">
+            <h3>命中来源</h3>
+            <div class="mini-list" id="source-list">
+              <div class="empty-state">当前还没有来源片段。</div>
+            </div>
           </div>
 
           <div class="detail-card">
