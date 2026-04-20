@@ -41,6 +41,9 @@ ENV_MAPPING = {
     "GPU_QUEUE_MAXSIZE": "gpu_queue_maxsize",
     "RAG_TOP_K": "rag_top_k",
     "RAG_SCORE_THRESHOLD": "rag_score_threshold",
+    "RAG_COLLECTION_NAME": "rag_collection_name",
+    "RAG_CHUNK_SIZE": "rag_chunk_size",
+    "RAG_CHUNK_OVERLAP": "rag_chunk_overlap",
     "POSTGRES_HOST": "postgres_host",
     "POSTGRES_PORT": "postgres_port",
     "POSTGRES_DB": "postgres_db",
@@ -84,6 +87,9 @@ class Settings(BaseModel):
 
     rag_top_k: int = 4
     rag_score_threshold: float = 0.1
+    rag_collection_name: str = "knowledge_chunks"
+    rag_chunk_size: int = 500
+    rag_chunk_overlap: int = 80
 
     postgres_host: str = "postgres"
     postgres_port: int = 5432
@@ -191,6 +197,9 @@ def _load_config_defaults() -> dict[str, Any]:
                 {
                     "rag_top_k": data.get("rag", {}).get("top_k"),
                     "rag_score_threshold": data.get("rag", {}).get("score_threshold"),
+                    "rag_collection_name": data.get("rag", {}).get("collection_name"),
+                    "rag_chunk_size": data.get("rag", {}).get("chunk_size"),
+                    "rag_chunk_overlap": data.get("rag", {}).get("chunk_overlap"),
                 }
             )
         elif path.name == "intents.toml":

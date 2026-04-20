@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from qdrant_client import QdrantClient
+
 from app.core.config import Settings
 from app.persistence.trace_store import SQLTraceStore
 from app.services.chat_pipeline import ChatPipeline
@@ -14,18 +16,22 @@ from app.services.intent_service import (
     MockIntentService,
     RemoteIntentService,
 )
-from app.services.knowledge_base import InMemoryKnowledgeBase
-from app.services.retriever_service import InMemoryRetrieverService
+from app.services.knowledge_base import InMemoryKnowledgeBase, KnowledgeBase, QdrantKnowledgeBase
+from app.services.retriever_service import (
+    InMemoryRetrieverService,
+    QdrantRetrieverService,
+    RetrieverService,
+)
 from app.services.trace_service import LangSmithObserver, TraceService
 
 
 @dataclass
 class ServiceContainer:
     settings: Settings
-    knowledge_base: InMemoryKnowledgeBase
+    knowledge_base: KnowledgeBase
     infra_service: InfraService
     intent_service: IntentService
-    retriever_service: InMemoryRetrieverService
+    retriever_service: RetrieverService
     generation_service: QueuedGenerationService
     trace_service: TraceService
     chat_pipeline: ChatPipeline
@@ -45,13 +51,30 @@ class ServiceContainer:
 
 
 def build_service_container(settings: Settings) -> ServiceContainer:
-    knowledge_base = InMemoryKnowledgeBase()
     infra_service = InfraService(settings=settings)
-    retriever_service = InMemoryRetrieverService(
-        knowledge_base=knowledge_base,
-        top_k=settings.rag_top_k,
-        score_threshold=settings.rag_score_threshold,
-    )
+    if settings.qdrant_url and settings.embedding_model_path:
+        qdrant_client = QdrantClient(url=settings.qdrant_url)
+        knowledge_base = QdrantKnowledgeBase(
+            qdrant_client=qdrant_client,
+            embedding_model_path=settings.embedding_model_path,
+            collection_name=settings.rag_collection_name,
+            chunk_size=settings.rag_chunk_size,
+            chunk_overlap=settings.rag_chunk_overlap,
+        )
+        retriever_service = QdrantRetrieverService(
+            qdrant_client=qdrant_client,
+            embedding_model_path=settings.embedding_model_path,
+            collection_name=settings.rag_collection_name,
+            top_k=settings.rag_top_k,
+            score_threshold=settings.rag_score_threshold,
+        )
+    else:
+        knowledge_base = InMemoryKnowledgeBase()
+        retriever_service = InMemoryRetrieverService(
+            knowledge_base=knowledge_base,
+            top_k=settings.rag_top_k,
+            score_threshold=settings.rag_score_threshold,
+        )
     trace_store = SQLTraceStore(settings.trace_store_dsn)
     langsmith_observer = LangSmithObserver(
         enabled=settings.langsmith_enabled,
