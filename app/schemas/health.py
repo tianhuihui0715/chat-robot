@@ -9,3 +9,6 @@ class HealthResponse(BaseModel):
     queued_requests: int
     knowledge_documents: int
     trace_requests: int
+    postgres_connected: bool
+    qdrant_connected: bool
+    minio_connected: bool

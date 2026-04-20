@@ -48,6 +48,11 @@ ENV_MAPPING = {
     "POSTGRES_PASSWORD": "postgres_password",
     "POSTGRES_DSN": "postgres_dsn",
     "QDRANT_URL": "qdrant_url",
+    "MINIO_ENDPOINT": "minio_endpoint",
+    "MINIO_ACCESS_KEY": "minio_access_key",
+    "MINIO_SECRET_KEY": "minio_secret_key",
+    "MINIO_SECURE": "minio_secure",
+    "MINIO_BUCKET": "minio_bucket",
     "LANGSMITH_ENABLED": "langsmith_enabled",
     "LANGSMITH_PROJECT": "langsmith_project",
     "LANGSMITH_ENDPOINT": "langsmith_endpoint",
@@ -88,6 +93,11 @@ class Settings(BaseModel):
     postgres_dsn: str = "postgresql+psycopg://chat_robot:chat_robot@postgres:5432/chat_robot"
 
     qdrant_url: str = "http://qdrant:6333"
+    minio_endpoint: str = "minio:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_secure: bool = False
+    minio_bucket: str = "chat-robot"
     langsmith_enabled: bool = False
     langsmith_project: str = "chat-robot"
     langsmith_endpoint: str = "https://api.smith.langchain.com"
@@ -156,6 +166,11 @@ def _load_config_defaults() -> dict[str, Any]:
                     "postgres_password": data.get("database", {}).get("password"),
                     "postgres_dsn": data.get("database", {}).get("dsn"),
                     "qdrant_url": data.get("vector_store", {}).get("qdrant_url"),
+                    "minio_endpoint": data.get("object_store", {}).get("endpoint"),
+                    "minio_access_key": data.get("object_store", {}).get("access_key"),
+                    "minio_secret_key": data.get("object_store", {}).get("secret_key"),
+                    "minio_secure": data.get("object_store", {}).get("secure"),
+                    "minio_bucket": data.get("object_store", {}).get("bucket"),
                 }
             )
         elif path.name == "models.toml":

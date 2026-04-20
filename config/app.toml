@@ -26,3 +26,10 @@ dsn = "postgresql+psycopg://chat_robot:chat_robot@postgres:5432/chat_robot"
 
 [vector_store]
 qdrant_url = "http://qdrant:6333"
+
+[object_store]
+endpoint = "minio:9000"
+access_key = "minioadmin"
+secret_key = "minioadmin"
+secure = false
+bucket = "chat-robot"

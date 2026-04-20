@@ -17,4 +17,7 @@ async def health(
         queued_requests=container.generation_service.queue_size,
         knowledge_documents=container.knowledge_base.count,
         trace_requests=container.trace_service.count_request_traces(),
+        postgres_connected=container.infra_service.check_postgres(),
+        qdrant_connected=container.infra_service.check_qdrant(),
+        minio_connected=container.infra_service.check_minio(),
     )

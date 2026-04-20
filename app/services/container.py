@@ -8,6 +8,7 @@ from app.services.generator_service import (
     QueuedGenerationService,
     RemoteGenerationBackend,
 )
+from app.services.infra_service import InfraService
 from app.services.intent_service import (
     IntentService,
     MockIntentService,
@@ -22,6 +23,7 @@ from app.services.trace_service import LangSmithObserver, TraceService
 class ServiceContainer:
     settings: Settings
     knowledge_base: InMemoryKnowledgeBase
+    infra_service: InfraService
     intent_service: IntentService
     retriever_service: InMemoryRetrieverService
     generation_service: QueuedGenerationService
@@ -29,6 +31,8 @@ class ServiceContainer:
     chat_pipeline: ChatPipeline
 
     async def start(self) -> None:
+        self.infra_service.setup()
+        self.infra_service.ensure_minio_bucket()
         self.trace_service.setup()
         await self.intent_service.start()
         await self.generation_service.start()
@@ -37,10 +41,12 @@ class ServiceContainer:
         await self.generation_service.stop()
         await self.intent_service.stop()
         await self.trace_service.shutdown()
+        self.infra_service.shutdown()
 
 
 def build_service_container(settings: Settings) -> ServiceContainer:
     knowledge_base = InMemoryKnowledgeBase()
+    infra_service = InfraService(settings=settings)
     retriever_service = InMemoryRetrieverService(
         knowledge_base=knowledge_base,
         top_k=settings.rag_top_k,
@@ -84,6 +90,7 @@ def build_service_container(settings: Settings) -> ServiceContainer:
     return ServiceContainer(
         settings=settings,
         knowledge_base=knowledge_base,
+        infra_service=infra_service,
         intent_service=intent_service,
         retriever_service=retriever_service,
         generation_service=generation_service,
