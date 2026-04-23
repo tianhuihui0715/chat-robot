@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Trace Dashboard</title>
+    <title>Chat Robot Admin</title>
     <link rel="stylesheet" href="/static/css/app.css" />
   </head>
   <body class="app-shell app-shell--traces">
@@ -11,21 +11,21 @@
     <main class="layout">
       <section class="hero-card">
         <div class="hero-card__copy">
-          <p class="eyebrow">Trace Dashboard</p>
-          <h1>过程日志面板</h1>
+          <p class="eyebrow">Admin Console</p>
+          <h1>后台管理台</h1>
           <p class="lede">
-            追踪每次请求的意图判断、检索、生成步骤和最终输出，方便你逐步复测整条链路。
+            统一管理流程日志、RAG 参数与流程对比。支持分页、懒加载、在线调参和即时生效。
           </p>
         </div>
         <div class="hero-card__actions">
           <a class="button button--ghost" href="/">返回聊天页</a>
-          <button class="button button--primary" id="refresh-traces" type="button">刷新日志</button>
+          <button class="button button--primary" id="refresh-admin" type="button">刷新后台</button>
         </div>
       </section>
 
       <section class="status-strip">
         <article class="status-tile">
-          <span class="status-tile__label">当前选中</span>
+          <span class="status-tile__label">选中请求</span>
           <strong class="status-tile__value" id="selected-trace">-</strong>
         </article>
         <article class="status-tile">
@@ -42,41 +42,153 @@
         </article>
       </section>
 
-      <section class="panel-grid panel-grid--wide">
-        <section class="panel panel--list">
-          <div class="panel__header">
-            <div>
-              <p class="panel__eyebrow">Requests</p>
-              <h2>请求列表</h2>
+      <section class="tabbar">
+        <button class="tabbar__button is-active" data-tab="logs" type="button">流程日志</button>
+        <button class="tabbar__button" data-tab="rag-config" type="button">RAG 配置</button>
+        <button class="tabbar__button" data-tab="rag-compare" type="button">流程对比</button>
+      </section>
+
+      <section class="admin-tab is-active" id="tab-logs">
+        <section class="panel-grid panel-grid--wide">
+          <section class="panel panel--list">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Requests</p>
+                <h2>请求列表</h2>
+              </div>
+              <div class="inline-row inline-row--compact">
+                <input id="trace-session-filter" type="text" placeholder="按 session_id 筛选" />
+                <select id="trace-status-filter">
+                  <option value="">全部状态</option>
+                  <option value="completed">completed</option>
+                  <option value="running">running</option>
+                  <option value="error">error</option>
+                </select>
+              </div>
             </div>
-          </div>
-          <div class="trace-list" id="trace-list"></div>
+            <div class="trace-list" id="trace-list"></div>
+            <div class="mini-list__footer">
+              <span class="hint" id="trace-page-summary">-</span>
+              <div class="mini-list__pager">
+                <button class="button button--ghost button--small" id="trace-prev-page" type="button">上一页</button>
+                <button class="button button--ghost button--small" id="trace-next-page" type="button">下一页</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel panel--detail">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Timeline</p>
+                <h2>执行明细</h2>
+              </div>
+              <button class="button button--ghost button--small" id="trace-view-all" type="button">查看全部</button>
+            </div>
+
+            <div class="trace-summary" id="trace-summary">
+              <p>选择左侧一条请求以查看详情。</p>
+            </div>
+
+            <div class="timeline" id="trace-timeline"></div>
+
+            <div class="detail-split">
+              <div class="detail-card">
+                <h3>最终输出</h3>
+                <pre class="code-block" id="trace-output">-</pre>
+              </div>
+              <div class="detail-card">
+                <h3>原始详情</h3>
+                <pre class="code-block" id="trace-raw">-</pre>
+              </div>
+            </div>
+          </section>
         </section>
+      </section>
 
-        <section class="panel panel--detail">
+      <section class="admin-tab" id="tab-rag-config">
+        <section class="panel">
           <div class="panel__header">
             <div>
-              <p class="panel__eyebrow">Timeline</p>
-              <h2>执行明细</h2>
+              <p class="panel__eyebrow">Runtime Config</p>
+              <h2>RAG 运行时参数</h2>
             </div>
           </div>
-
-          <div class="trace-summary" id="trace-summary">
-            <p>选择左侧一条请求以查看详情。</p>
-          </div>
-
-          <div class="timeline" id="trace-timeline"></div>
-
-          <div class="detail-split">
-            <div class="detail-card">
-              <h3>最终输出</h3>
-              <pre class="code-block" id="trace-output">-</pre>
+          <form class="stack-form" id="rag-config-form">
+            <div class="detail-split">
+              <label class="stack-form__label">
+                Top K
+                <input id="rag-top-k" type="number" min="1" max="20" />
+              </label>
+              <label class="stack-form__label">
+                Score Threshold
+                <input id="rag-score-threshold" type="number" min="0" max="1" step="0.01" />
+              </label>
+              <label class="stack-form__label">
+                Candidate Multiplier
+                <input id="rag-candidate-multiplier" type="number" min="1" max="10" />
+              </label>
+              <label class="stack-form__label">
+                Chunk Size
+                <input id="rag-chunk-size" type="number" min="100" max="4000" />
+              </label>
+              <label class="stack-form__label">
+                Chunk Overlap
+                <input id="rag-chunk-overlap" type="number" min="0" max="1000" />
+              </label>
+              <label class="toggle">
+                <input id="rag-reranker-enabled" type="checkbox" />
+                <span>启用重排序</span>
+              </label>
             </div>
-            <div class="detail-card">
-              <h3>原始详情</h3>
-              <pre class="code-block" id="trace-raw">-</pre>
+            <div class="composer__actions">
+              <span class="hint" id="rag-config-hint">Chunk 参数对后续新导入文档立即生效，已入库文档不会自动重切。</span>
+              <button class="button button--primary" type="submit">保存并生效</button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <section class="admin-tab" id="tab-rag-compare">
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Workflow Compare</p>
+              <h2>流程结果对比</h2>
             </div>
           </div>
+          <form class="stack-form" id="rag-compare-form">
+            <label class="stack-form__label">
+              测试问题
+              <textarea id="compare-query" rows="4" placeholder="输入一个要对比的 RAG 问题"></textarea>
+            </label>
+            <div class="detail-split">
+              <div class="detail-card">
+                <h3>方案 A</h3>
+                <div class="stack-form">
+                  <label class="stack-form__label">名称<input id="compare-a-name" type="text" value="当前配置" /></label>
+                  <label class="stack-form__label">Top K<input id="compare-a-top-k" type="number" min="1" max="20" /></label>
+                  <label class="stack-form__label">Threshold<input id="compare-a-threshold" type="number" min="0" max="1" step="0.01" /></label>
+                  <label class="stack-form__label">Candidate Multiplier<input id="compare-a-multiplier" type="number" min="1" max="10" /></label>
+                  <label class="toggle"><input id="compare-a-rerank" type="checkbox" /><span>启用重排序</span></label>
+                </div>
+              </div>
+              <div class="detail-card">
+                <h3>方案 B</h3>
+                <div class="stack-form">
+                  <label class="stack-form__label">名称<input id="compare-b-name" type="text" value="对照方案" /></label>
+                  <label class="stack-form__label">Top K<input id="compare-b-top-k" type="number" min="1" max="20" /></label>
+                  <label class="stack-form__label">Threshold<input id="compare-b-threshold" type="number" min="0" max="1" step="0.01" /></label>
+                  <label class="stack-form__label">Candidate Multiplier<input id="compare-b-multiplier" type="number" min="1" max="10" /></label>
+                  <label class="toggle"><input id="compare-b-rerank" type="checkbox" /><span>启用重排序</span></label>
+                </div>
+              </div>
+            </div>
+            <div class="composer__actions">
+              <span class="hint" id="rag-compare-hint">对比会同时展示来源片段和最终回答，便于观察不同流程差异。</span>
+              <button class="button button--primary" type="submit">运行对比</button>
+            </div>
+          </form>
+          <div class="detail-split" id="compare-results"></div>
         </section>
       </section>
     </main>

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAG 配置</title>
+    <link rel="stylesheet" href="/static/css/app.css?v=20260423-admin4" />
+  </head>
+  <body class="app-shell app-shell--admin">
+    <div class="background-grid" aria-hidden="true"></div>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <a class="admin-brand" href="/">
+          <span class="admin-brand__eyebrow">Chat Robot</span>
+          <strong>控制台</strong>
+        </a>
+        <nav class="admin-nav">
+          <a class="admin-nav__link" href="/">对话</a>
+          <a class="admin-nav__link" href="/knowledge">知识库</a>
+          <a class="admin-nav__link" href="/admin">系统概览</a>
+          <a class="admin-nav__link" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link is-active" href="/admin/rag">RAG 配置</a>
+          <a class="admin-nav__link" href="/admin/compare">效果对比</a>
+          <a class="admin-nav__link" href="/docs">API 文档</a>
+        </nav>
+      </aside>
+
+      <main class="admin-main">
+        <section class="admin-topbar">
+          <div>
+            <p class="eyebrow">Runtime Config</p>
+            <h1>RAG 配置</h1>
+            <p class="lede">把召回数、阈值、重排序和切片参数独立放到一个页面里，便于在线调参并立刻观察效果。</p>
+          </div>
+        </section>
+
+        <section class="panel-grid">
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Online Editing</p>
+                <h2>运行时参数</h2>
+              </div>
+            </div>
+            <form class="stack-form" id="rag-config-form">
+              <div class="detail-split">
+                <label class="stack-form__label">
+                  Top K
+                  <input id="rag-top-k" type="number" min="1" max="20" />
+                </label>
+                <label class="stack-form__label">
+                  Score Threshold
+                  <input id="rag-score-threshold" type="number" min="0" max="1" step="0.01" />
+                </label>
+                <label class="stack-form__label">
+                  Candidate Multiplier
+                  <input id="rag-candidate-multiplier" type="number" min="1" max="10" />
+                </label>
+                <label class="stack-form__label">
+                  Chunk Size
+                  <input id="rag-chunk-size" type="number" min="100" max="4000" />
+                </label>
+                <label class="stack-form__label">
+                  Chunk Overlap
+                  <input id="rag-chunk-overlap" type="number" min="0" max="1000" />
+                </label>
+                <label class="toggle">
+                  <input id="rag-reranker-enabled" type="checkbox" />
+                  <span>启用重排序</span>
+                </label>
+              </div>
+              <div class="composer__actions">
+                <span class="hint" id="rag-config-hint">检索参数会立即生效，Chunk 参数会用于后续新导入文档。</span>
+                <button class="button button--primary" type="submit">保存并生效</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Notes</p>
+                <h2>参数说明</h2>
+              </div>
+            </div>
+            <div class="mini-list">
+              <article class="mini-list__item">
+                <strong>Top K</strong>
+                <p>控制最终送入基座模型的来源片段数量，越大上下文越丰富，但噪音也会增加。</p>
+              </article>
+              <article class="mini-list__item">
+                <strong>Score Threshold</strong>
+                <p>过滤相似度过低的召回结果，能降低误命中，但阈值过高会让来源不足。</p>
+              </article>
+              <article class="mini-list__item">
+                <strong>Candidate Multiplier</strong>
+                <p>决定重排序前的候选召回规模，开启 reranker 时一般要比 Top K 更大一些。</p>
+              </article>
+              <article class="mini-list__item">
+                <strong>Chunk 参数</strong>
+                <p>切片只影响后续新导入内容，不会自动重切旧文档；需要重新导入才能完整体现差异。</p>
+              </article>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/js/admin-common.js?v=20260423-admin4" defer></script>
+    <script src="/static/js/admin-rag.js?v=20260423-admin4" defer></script>
+  </body>
+</html>

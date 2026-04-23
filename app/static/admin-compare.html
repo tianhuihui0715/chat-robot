@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAG 实验台</title>
+    <link rel="stylesheet" href="/static/css/app.css?v=20260423-admin8" />
+  </head>
+  <body class="app-shell app-shell--admin">
+    <div class="background-grid" aria-hidden="true"></div>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <a class="admin-brand" href="/">
+          <span class="admin-brand__eyebrow">Chat Robot</span>
+          <strong>控制台</strong>
+        </a>
+        <nav class="admin-nav">
+          <a class="admin-nav__link" href="/">对话</a>
+          <a class="admin-nav__link" href="/knowledge">知识库</a>
+          <a class="admin-nav__link" href="/admin">系统概览</a>
+          <a class="admin-nav__link" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
+          <a class="admin-nav__link is-active" href="/admin/compare">RAG 评测</a>
+          <a class="admin-nav__link" href="/docs">API 文档</a>
+        </nav>
+      </aside>
+
+      <main class="admin-main">
+        <section class="admin-topbar">
+          <div>
+            <p class="eyebrow">RAG Lab</p>
+            <h1>RAG 实验台</h1>
+            <p class="lede">上传多格式文件，输入问题集，然后比较不同 chunk、重复率、召回、重排和温度参数下的表现。实验结果只保存在内存里，不会写入正式知识库。</p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Guide</p>
+              <h2>实验说明</h2>
+            </div>
+          </div>
+          <div class="guide-grid">
+            <article class="guide-card">
+              <h3>支持格式</h3>
+              <p class="hint">当前支持：`.txt`、`.md`、`.json`、`.jsonl`、`.csv`、`.tsv`、`.yaml`、`.yml`、`.xml`、`.html`、`.docx`、`.xlsx`、`.pdf`。</p>
+              <p class="hint">每个上传文件只用于当前实验，不会进入正式知识库。</p>
+            </article>
+            <article class="guide-card">
+              <h3>参数含义</h3>
+              <p class="hint"><strong>Chunk Size</strong>：切片长度。</p>
+              <p class="hint"><strong>Overlap Ratio</strong>：相邻 chunk 的重复比例，`0.2` 表示 20%。</p>
+              <p class="hint"><strong>Retrieval K</strong>：向量召回保留多少候选。</p>
+              <p class="hint"><strong>Rerank K</strong>：重排后最终保留多少条，`0` 表示关闭重排。</p>
+              <p class="hint"><strong>Temperature</strong>：生成温度，越高越发散。</p>
+            </article>
+            <article class="guide-card">
+              <h3>应用结果</h3>
+              <p class="hint">你可以从实验结果里选择某一套参数“应用为正式参数”。</p>
+              <p class="hint">其中 chunk 相关参数只影响后续新导入文档，不会自动重切现有知识库。</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Input</p>
+              <h2>实验输入</h2>
+            </div>
+            <span class="badge badge--neutral" id="rag-lab-status">待运行</span>
+          </div>
+          <form class="stack-form" id="rag-lab-form">
+            <label class="stack-form__label">
+              实验文件
+              <input
+                id="rag-lab-files"
+                type="file"
+                multiple
+                accept=".txt,.md,.markdown,.json,.jsonl,.csv,.tsv,.log,.yaml,.yml,.xml,.html,.htm,.docx,.xlsx,.pdf"
+              />
+            </label>
+            <p class="hint">文件在后端解析，因此可以直接上传二进制格式文档。</p>
+
+            <label class="stack-form__label">
+              问题列表
+              <textarea
+                id="rag-lab-questions"
+                rows="7"
+                placeholder="每行一个问题，例如：&#10;在神雕侠侣中，比较激情的战斗有哪些场&#10;知识库导入进度里的 chunks 64/1742 表示什么"
+              ></textarea>
+            </label>
+
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Variants</p>
+                <h3>参数方案</h3>
+              </div>
+              <button class="button button--ghost button--small" id="add-variant-button" type="button">新增方案</button>
+            </div>
+            <div class="detail-split" id="variant-list"></div>
+
+            <div class="composer__actions composer__actions--wrap">
+              <span class="hint" id="rag-lab-hint">页面先展示简略结果。如果需要全量结果，可以下载 Excel 或 Word。</span>
+              <button class="button button--primary" id="rag-lab-submit" type="submit">开始实验</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel" id="rag-lab-actions" hidden>
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Session</p>
+              <h2>实验会话</h2>
+            </div>
+          </div>
+          <div class="composer__actions composer__actions--wrap">
+            <span class="hint" id="rag-lab-session-meta">尚未运行实验。</span>
+            <button class="button button--ghost" id="rag-lab-export-excel" type="button">下载 Excel</button>
+            <button class="button button--ghost" id="rag-lab-export-word" type="button">下载 Word</button>
+          </div>
+        </section>
+
+        <section class="panel" id="rag-lab-results-panel" hidden>
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Results</p>
+              <h2>结果视图</h2>
+            </div>
+          </div>
+          <div class="tabbar" id="rag-lab-view-switch">
+            <button class="tabbar__button is-active" data-view="variant" type="button">按方案查看</button>
+            <button class="tabbar__button" data-view="question" type="button">按问题对比</button>
+          </div>
+          <div class="admin-tab is-active" data-view-panel="variant">
+            <div class="detail-split" id="rag-lab-variant-results"></div>
+          </div>
+          <div class="admin-tab" data-view-panel="question">
+            <div class="mini-list" id="rag-lab-question-results"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="variant-card-template">
+      <article class="detail-card rag-lab-variant-card">
+        <div class="detail-card__title-row">
+          <h3 class="variant-title">方案</h3>
+          <button class="button button--ghost button--small variant-remove" type="button">删除</button>
+        </div>
+        <div class="stack-form">
+          <label class="stack-form__label">名称<input class="variant-name" type="text" /></label>
+          <label class="stack-form__label">Chunk Size<input class="variant-chunk-size" type="number" min="100" max="4000" /></label>
+          <label class="stack-form__label">Overlap Ratio<input class="variant-overlap-ratio" type="number" min="0" max="0.8" step="0.05" /></label>
+          <label class="stack-form__label">Retrieval K<input class="variant-retrieval-k" type="number" min="1" max="20" /></label>
+          <label class="stack-form__label">Rerank K<input class="variant-rerank-k" type="number" min="0" max="20" /></label>
+          <label class="stack-form__label">Temperature<input class="variant-temperature" type="number" min="0" max="2" step="0.1" /></label>
+        </div>
+      </article>
+    </template>
+
+    <script src="/static/js/admin-common.js?v=20260423-admin8" defer></script>
+    <script src="/static/js/admin-compare.js?v=20260423-admin8" defer></script>
+  </body>
+</html>

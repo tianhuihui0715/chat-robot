@@ -3,13 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Protocol
+from threading import Thread
+from typing import AsyncIterator, Protocol
 
 from app.schemas.chat import ChatMessage, IntentDecision
-from app.schemas.inference import (
-    InferenceGenerateRequest,
-    InferenceIntentRequest,
-)
+from app.schemas.inference import InferenceGenerateRequest, InferenceIntentRequest
 
 
 class InferenceBackend(Protocol):
@@ -30,6 +28,9 @@ class InferenceBackend(Protocol):
 
 class GenerationInferenceBackend(InferenceBackend, Protocol):
     async def generate(self, request: InferenceGenerateRequest) -> str:
+        ...
+
+    async def generate_stream(self, request: InferenceGenerateRequest) -> AsyncIterator[str]:
         ...
 
 
@@ -66,6 +67,12 @@ class MockInferenceBackend:
             )
         return f"这是独立推理服务返回的 mock 回答。问题：{latest_user_message}"
 
+    async def generate_stream(self, request: InferenceGenerateRequest) -> AsyncIterator[str]:
+        answer = await self.generate(request)
+        for index in range(0, len(answer), 12):
+            await asyncio.sleep(0.03)
+            yield answer[index : index + 12]
+
 
 class MockIntentInferenceBackend:
     @property
@@ -100,6 +107,8 @@ class LocalHFGenerationBackend:
         self._tokenizer = None
         self._model = None
         self._torch = None
+        self._load_lock = asyncio.Lock()
+        self._generate_lock = asyncio.Lock()
 
     @property
     def model_name(self) -> str | None:
@@ -110,28 +119,65 @@ class LocalHFGenerationBackend:
         return self._model is not None and self._tokenizer is not None
 
     async def start(self) -> None:
-        self._torch, self._tokenizer, self._model = _load_quantized_model(self._model_path)
+        async with self._load_lock:
+            await self._ensure_loaded()
 
     async def stop(self) -> None:
+        async with self._load_lock:
+            self._unload()
+
+    async def generate(self, request: InferenceGenerateRequest) -> str:
+        async with self._generate_lock:
+            async with self._load_lock:
+                await self._ensure_loaded()
+
+            if self._model is None or self._tokenizer is None or self._torch is None:
+                raise RuntimeError("LocalHFGenerationBackend failed to load the generation model.")
+
+            chat_messages = self._build_chat_messages(request)
+            answer = _generate_chat_completion(
+                tokenizer=self._tokenizer,
+                model=self._model,
+                torch_module=self._torch,
+                chat_messages=chat_messages,
+                max_input_tokens=self._max_input_tokens,
+                max_new_tokens=request.max_new_tokens or self._default_max_new_tokens,
+                temperature=request.temperature,
+            )
+            return _sanitize_output(answer)
+
+    async def generate_stream(self, request: InferenceGenerateRequest) -> AsyncIterator[str]:
+        async with self._generate_lock:
+            async with self._load_lock:
+                await self._ensure_loaded()
+
+            if self._model is None or self._tokenizer is None or self._torch is None:
+                raise RuntimeError("LocalHFGenerationBackend failed to load the generation model.")
+
+            chat_messages = self._build_chat_messages(request)
+            raw_stream = _generate_chat_completion_stream(
+                tokenizer=self._tokenizer,
+                model=self._model,
+                torch_module=self._torch,
+                chat_messages=chat_messages,
+                max_input_tokens=self._max_input_tokens,
+                max_new_tokens=request.max_new_tokens or self._default_max_new_tokens,
+                temperature=request.temperature,
+            )
+            async for chunk in _strip_think_tags_from_stream(raw_stream):
+                if chunk:
+                    yield chunk
+
+    async def _ensure_loaded(self) -> None:
+        if self.model_loaded:
+            return
+        self._torch, self._tokenizer, self._model = _load_quantized_model(self._model_path)
+
+    def _unload(self) -> None:
         _release_model(self._torch, self._tokenizer, self._model)
         self._tokenizer = None
         self._model = None
         self._torch = None
-
-    async def generate(self, request: InferenceGenerateRequest) -> str:
-        if self._model is None or self._tokenizer is None or self._torch is None:
-            raise RuntimeError("LocalHFGenerationBackend has not been started.")
-
-        chat_messages = self._build_chat_messages(request)
-        answer = _generate_chat_completion(
-            tokenizer=self._tokenizer,
-            model=self._model,
-            torch_module=self._torch,
-            chat_messages=chat_messages,
-            max_input_tokens=self._max_input_tokens,
-            max_new_tokens=request.max_new_tokens or self._default_max_new_tokens,
-        )
-        return _sanitize_output(answer)
 
     def _build_chat_messages(self, request: InferenceGenerateRequest) -> list[dict[str, str]]:
         system_parts = [
@@ -162,10 +208,7 @@ class LocalHFGenerationBackend:
             {"role": "system", "content": "\n\n".join(system_parts)}
         ]
         chat_messages.extend(
-            {
-                "role": message.role,
-                "content": message.content,
-            }
+            {"role": message.role, "content": message.content}
             for message in request.messages
             if message.role in {"user", "assistant"}
         )
@@ -212,7 +255,8 @@ class LocalHFIntentBackend:
         return self._model is not None and self._tokenizer is not None
 
     async def start(self) -> None:
-        return None
+        async with self._load_lock:
+            await self._ensure_loaded()
 
     async def stop(self) -> None:
         async with self._load_lock:
@@ -361,10 +405,7 @@ def _load_quantized_model(model_path: str):
         bnb_4bit_use_double_quant=True,
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_path,
-        trust_remote_code=True,
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         quantization_config=quant_config,
@@ -378,10 +419,7 @@ def _load_cpu_model(model_path: str):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_path,
-        trust_remote_code=True,
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         torch_dtype=torch.float32,
@@ -401,14 +439,7 @@ def _release_model(torch_module, tokenizer, model) -> None:
         torch_module.cuda.empty_cache()
 
 
-def _generate_chat_completion(
-    tokenizer,
-    model,
-    torch_module,
-    chat_messages: list[dict[str, str]],
-    max_input_tokens: int,
-    max_new_tokens: int,
-) -> str:
+def _prepare_generation_inputs(tokenizer, chat_messages, max_input_tokens: int):
     text = tokenizer.apply_chat_template(
         chat_messages,
         tokenize=False,
@@ -422,17 +453,101 @@ def _generate_chat_completion(
         input_ids = input_ids[:, -max_input_tokens:]
         attention_mask = attention_mask[:, -max_input_tokens:]
 
+    return input_ids, attention_mask
+
+
+def _generate_chat_completion(
+    tokenizer,
+    model,
+    torch_module,
+    chat_messages: list[dict[str, str]],
+    max_input_tokens: int,
+    max_new_tokens: int,
+    temperature: float | None = None,
+) -> str:
+    input_ids, attention_mask = _prepare_generation_inputs(
+        tokenizer,
+        chat_messages,
+        max_input_tokens,
+    )
+
     device = model.device
+    generate_kwargs = {
+        "input_ids": input_ids.to(device),
+        "attention_mask": attention_mask.to(device),
+        "max_new_tokens": max_new_tokens,
+        "do_sample": bool(temperature and temperature > 0),
+        "pad_token_id": tokenizer.eos_token_id,
+    }
+    if temperature and temperature > 0:
+        generate_kwargs["temperature"] = temperature
     with torch_module.inference_mode():
-        outputs = model.generate(
-            input_ids=input_ids.to(device),
-            attention_mask=attention_mask.to(device),
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            pad_token_id=tokenizer.eos_token_id,
-        )
+        outputs = model.generate(**generate_kwargs)
     generated_tokens = outputs[0][input_ids.shape[1] :]
     return tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+
+
+async def _generate_chat_completion_stream(
+    tokenizer,
+    model,
+    torch_module,
+    chat_messages: list[dict[str, str]],
+    max_input_tokens: int,
+    max_new_tokens: int,
+    temperature: float | None = None,
+) -> AsyncIterator[str]:
+    from transformers import TextIteratorStreamer
+
+    input_ids, attention_mask = _prepare_generation_inputs(
+        tokenizer,
+        chat_messages,
+        max_input_tokens,
+    )
+    device = model.device
+    streamer = TextIteratorStreamer(
+        tokenizer,
+        skip_prompt=True,
+        skip_special_tokens=True,
+    )
+    generation_error: list[BaseException] = []
+
+    def _run_generation() -> None:
+        try:
+            generate_kwargs = {
+                "input_ids": input_ids.to(device),
+                "attention_mask": attention_mask.to(device),
+                "max_new_tokens": max_new_tokens,
+                "do_sample": bool(temperature and temperature > 0),
+                "pad_token_id": tokenizer.eos_token_id,
+                "streamer": streamer,
+            }
+            if temperature and temperature > 0:
+                generate_kwargs["temperature"] = temperature
+            with torch_module.inference_mode():
+                model.generate(**generate_kwargs)
+        except BaseException as exc:  # pragma: no cover - defensive background thread capture
+            generation_error.append(exc)
+
+    generation_thread = Thread(target=_run_generation, daemon=True)
+    generation_thread.start()
+
+    iterator = iter(streamer)
+    while True:
+        chunk = await asyncio.to_thread(_next_stream_chunk, iterator)
+        if chunk is None:
+            break
+        yield chunk
+
+    await asyncio.to_thread(generation_thread.join)
+    if generation_error:
+        raise RuntimeError(str(generation_error[0])) from generation_error[0]
+
+
+def _next_stream_chunk(iterator):
+    try:
+        return next(iterator)
+    except StopIteration:
+        return None
 
 
 def _sanitize_output(answer: str) -> str:
@@ -441,12 +556,44 @@ def _sanitize_output(answer: str) -> str:
     return cleaned.strip() or answer.strip()
 
 
+async def _strip_think_tags_from_stream(chunks: AsyncIterator[str]) -> AsyncIterator[str]:
+    buffer = ""
+    inside_think = False
+
+    async for chunk in chunks:
+        buffer += chunk
+
+        while buffer:
+            if inside_think:
+                end_index = buffer.find("</think>")
+                if end_index == -1:
+                    break
+                buffer = buffer[end_index + len("</think>") :]
+                inside_think = False
+                continue
+
+            start_index = buffer.find("<think>")
+            if start_index == -1:
+                safe_length = max(0, len(buffer) - len("<think>"))
+                if safe_length:
+                    yield buffer[:safe_length]
+                    buffer = buffer[safe_length:]
+                break
+
+            if start_index > 0:
+                yield buffer[:start_index]
+            buffer = buffer[start_index + len("<think>") :]
+            inside_think = True
+
+    if not inside_think and buffer:
+        cleaned = buffer.replace("<think>", "").replace("</think>", "")
+        if cleaned:
+            yield cleaned
+
+
 def _format_conversation(messages: list[ChatMessage]) -> str:
     return json.dumps(
-        [
-            {"role": message.role, "content": message.content}
-            for message in messages
-        ],
+        [{"role": message.role, "content": message.content} for message in messages],
         ensure_ascii=False,
     )
 
@@ -590,9 +737,7 @@ def _looks_like_follow_up_fragment(text: str) -> bool:
         "这个",
         "这个呢",
         "那个",
-        "那这个",
-        "那这个呢",
-        "那 Windows",
+        "那个呢",
         "详细说说",
         "继续",
         "为什么",
@@ -672,7 +817,7 @@ def _matches_reject_rule(text: str) -> bool:
     reject_patterns = (
         r"制作.*炸弹",
         r"炸弹.*制作",
-        r"窃取.*(账号|账[号戶]|密码|凭证)",
+        r"窃取.*(账号|帐号|密码|凭证)",
         r"(盗取|窃取).*(密码|账号|隐私|凭证)",
         r"入侵.*(服务器|系统|网站)",
         r"骗取.*(隐私|信息|资料)",
@@ -698,10 +843,10 @@ def _matches_chat_rule(text: str) -> bool:
         return False
 
     chat_patterns = (
-        r"^(你好|您好|嗨|hi|hello)[！!。,.，]*$",
-        r"^(谢谢|感谢|辛苦了|多谢)[！!。,.，]*$",
-        r"^(再见|拜拜|晚安)[！!。,.，]*$",
-        r"^你(是谁|能做什么).*$",
+        r"^(你好|您好|嗨|hi|hello)[，,。.!？?]*$",
+        r"^(谢谢|感谢|辛苦了|多谢)[，,。.!？?]*$",
+        r"^(再见|拜拜|晚安)[，,。.!？?]*$",
+        r"^你是谁|能做什么.*$",
         r"^你.*(能帮我做什么|可以帮我做什么|都能做什么).*$",
     )
     return any(re.match(pattern, normalized) for pattern in chat_patterns)
@@ -761,7 +906,7 @@ def _matches_task_rule(text: str) -> bool:
         r"^请(帮我)?(写|生成|整理|总结|改写|翻译|列出|制定|设计|规划).+",
         r"^把.+(列出来|整理出来|总结出来|改写成).+",
         r"^请生成.+(提纲|模板|计划|方案).+",
-        r"^帮我写.+",
+        r"^帮我做.+",
         r"^帮我把.+",
     )
     return any(re.match(pattern, normalized) for pattern in task_patterns)

@@ -38,6 +38,7 @@ ENV_MAPPING = {
     "RERANKER_MODEL_PATH": "reranker_model_path",
     "LLM_MAX_INPUT_TOKENS": "llm_max_input_tokens",
     "LLM_MAX_NEW_TOKENS": "llm_max_new_tokens",
+    "LLM_TEMPERATURE": "llm_temperature",
     "GPU_QUEUE_MAXSIZE": "gpu_queue_maxsize",
     "RAG_TOP_K": "rag_top_k",
     "RAG_SCORE_THRESHOLD": "rag_score_threshold",
@@ -83,6 +84,7 @@ class Settings(BaseModel):
 
     llm_max_input_tokens: int = 8192
     llm_max_new_tokens: int = 512
+    llm_temperature: float = 0.0
     gpu_queue_maxsize: int = 100
 
     rag_top_k: int = 4
@@ -189,6 +191,7 @@ def _load_config_defaults() -> dict[str, Any]:
                     "reranker_model_path": data.get("paths", {}).get("reranker_model_path"),
                     "llm_max_input_tokens": data.get("generation", {}).get("llm_max_input_tokens"),
                     "llm_max_new_tokens": data.get("generation", {}).get("llm_max_new_tokens"),
+                    "llm_temperature": data.get("generation", {}).get("llm_temperature"),
                     "gpu_queue_maxsize": data.get("generation", {}).get("gpu_queue_maxsize"),
                 }
             )

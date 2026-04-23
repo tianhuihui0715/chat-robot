@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+import json
 
 from fastapi import Depends, FastAPI
+from fastapi.responses import StreamingResponse
 
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
@@ -116,6 +118,30 @@ def create_app() -> FastAPI:
             model_name=container.generation_backend.model_name,
         )
 
+    @inference_app.post("/generate/stream")
+    async def generate_stream(
+        request: InferenceGenerateRequest,
+        container: InferenceContainer = Depends(get_inference_container),
+    ) -> StreamingResponse:
+        async def event_stream():
+            try:
+                async for delta in container.generation_backend.generate_stream(request):
+                    if delta:
+                        yield _sse_event({"type": "delta", "delta": delta})
+            except Exception as exc:
+                yield _sse_event({"type": "error", "message": str(exc)})
+            else:
+                yield _sse_event({"type": "done"})
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @inference_app.post("/intent", response_model=InferenceIntentResponse)
     async def intent(
         request: InferenceIntentRequest,
@@ -132,3 +158,7 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+def _sse_event(payload: dict) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Protocol
 
 from qdrant_client import QdrantClient
 
 from app.schemas.chat import SourceChunk
+from app.services.embedding_service import CrossEncoderProvider, SentenceTransformerProvider
 from app.services.knowledge_base import InMemoryKnowledgeBase, KnowledgeRecord
 
 
@@ -59,17 +61,19 @@ class QdrantRetrieverService:
     def __init__(
         self,
         qdrant_client: QdrantClient,
-        embedding_model_path: str,
+        embedder_provider: SentenceTransformerProvider,
         collection_name: str,
         top_k: int = 4,
         score_threshold: float = 0.1,
+        reranker_provider: CrossEncoderProvider | None = None,
     ) -> None:
         self._qdrant_client = qdrant_client
-        self._embedding_model_path = embedding_model_path
+        self._embedder_provider = embedder_provider
         self._collection_name = collection_name
         self._top_k = top_k
         self._score_threshold = score_threshold
-        self._embedder = None
+        self._reranker_provider = reranker_provider
+        self._candidate_multiplier = 3
 
     async def retrieve(self, query: str) -> list[SourceChunk]:
         normalized_query = query.strip()
@@ -83,15 +87,8 @@ class QdrantRetrieverService:
             normalize_embeddings=True,
             convert_to_numpy=True,
         )
-        results = self._qdrant_client.search(
-            collection_name=self._collection_name,
-            query_vector=vector.tolist(),
-            limit=self._top_k,
-            score_threshold=self._score_threshold,
-            with_payload=True,
-            with_vectors=False,
-        )
-        return [
+        results = self._search_points(vector.tolist())
+        chunks = [
             SourceChunk(
                 document_id=str(hit.payload.get("document_id", "")),
                 title=str(hit.payload.get("title", "")),
@@ -107,16 +104,90 @@ class QdrantRetrieverService:
             )
             for hit in results
         ]
+        if self._reranker_provider is not None and chunks:
+            chunks = await self._rerank(normalized_query, chunks)
+        return chunks[: self._top_k]
+
+    def _search_points(self, query_vector: list[float]):
+        if hasattr(self._qdrant_client, "search"):
+            return self._qdrant_client.search(
+                collection_name=self._collection_name,
+                query_vector=query_vector,
+                limit=max(self._top_k, self._top_k * self._candidate_multiplier),
+                score_threshold=self._score_threshold,
+                with_payload=True,
+                with_vectors=False,
+            )
+
+        query_response = self._qdrant_client.query_points(
+            collection_name=self._collection_name,
+            query=query_vector,
+            limit=max(self._top_k, self._top_k * self._candidate_multiplier),
+            score_threshold=self._score_threshold,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return query_response.points
 
     def _get_embedder(self):
-        if self._embedder is None:
-            from sentence_transformers import SentenceTransformer
+        return self._embedder_provider.get_model()
 
-            self._embedder = SentenceTransformer(self._embedding_model_path, device="cpu")
-        return self._embedder
+    async def _rerank(self, query: str, chunks: list[SourceChunk]) -> list[SourceChunk]:
+        reranker = self._reranker_provider.get_model()
+        pairs = [(query, f"{chunk.title}\n{chunk.content}") for chunk in chunks]
+        scores = await asyncio.to_thread(reranker.predict, pairs)
+        reranked = sorted(
+            zip(chunks, scores),
+            key=lambda item: float(item[1]),
+            reverse=True,
+        )
+        return [
+            SourceChunk(
+                document_id=chunk.document_id,
+                title=chunk.title,
+                content=chunk.content,
+                score=float(score),
+                metadata={
+                    **chunk.metadata,
+                    "retrieval_score": str(chunk.score),
+                    "rerank_score": str(float(score)),
+                },
+            )
+            for chunk, score in reranked
+        ]
 
     def _collection_exists(self) -> bool:
         collection_names = {
             collection.name for collection in self._qdrant_client.get_collections().collections
         }
         return self._collection_name in collection_names
+
+    @property
+    def top_k(self) -> int:
+        return self._top_k
+
+    @property
+    def score_threshold(self) -> float:
+        return self._score_threshold
+
+    @property
+    def candidate_multiplier(self) -> int:
+        return self._candidate_multiplier
+
+    @property
+    def reranker_enabled(self) -> bool:
+        return self._reranker_provider is not None
+
+    def update_runtime_config(
+        self,
+        *,
+        top_k: int,
+        score_threshold: float,
+        candidate_multiplier: int,
+        reranker_enabled: bool,
+        reranker_provider: CrossEncoderProvider | None = None,
+    ) -> None:
+        self._top_k = top_k
+        self._score_threshold = score_threshold
+        self._candidate_multiplier = candidate_multiplier
+        self._reranker_provider = reranker_provider if reranker_enabled else None

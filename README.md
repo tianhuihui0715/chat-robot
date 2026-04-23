@@ -149,6 +149,53 @@ docker compose logs -f api
 docker compose logs -f inference
 ```
 
+## WSL Compose Setup
+
+If you plan to run everything inside WSL, prefer Docker Compose over the
+Windows `start-api.cmd` / `start-inference.cmd` scripts.
+
+1. Copy the environment file:
+
+```bash
+cp .env.example .env
+```
+
+2. Make sure the model paths in `.env` match your WSL machine:
+
+```bash
+HOST_MODEL_ROOT=/root/models
+LLM_MODEL_PATH=/root/models/Qwen3-8B
+INTENT_MODEL_PATH=/root/models/Qwen2.5-1.5B-Instruct
+EMBEDDING_MODEL_PATH=/root/models/bge-m3
+RERANKER_MODEL_PATH=/root/models/bge-reranker-v2-m3
+```
+
+The `api` service also mounts `HOST_MODEL_ROOT` because document ingest and
+retrieval currently load the embedding model (`bge-m3`) inside the API
+container.
+
+3. Start all services in WSL:
+
+```bash
+docker compose up --build -d
+```
+
+4. Check service status:
+
+```bash
+docker compose ps
+docker compose logs -f inference
+docker compose logs -f api
+```
+
+MinIO will be exposed to the WSL host on:
+
+- API: `http://127.0.0.1:19000`
+- Console: `http://127.0.0.1:19001`
+
+If those ports still conflict on your machine, update `MINIO_API_PORT` and
+`MINIO_CONSOLE_PORT` in `.env`.
+
 ## Windows API only setup
 
 When the model service is already running in WSL, the Windows host can use a

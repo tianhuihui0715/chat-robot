@@ -3,205 +3,136 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Chat Robot Console</title>
+    <title>本地对话控制台</title>
     <link rel="stylesheet" href="/static/css/app.css" />
   </head>
-  <body class="app-shell app-shell--chat">
+  <body class="app-shell app-shell--admin">
     <div class="background-grid" aria-hidden="true"></div>
-    <main class="layout">
-      <section class="hero-card">
-        <div class="hero-card__copy">
-          <p class="eyebrow">Chat Robot</p>
-          <h1>本地对话控制台</h1>
-          <p class="lede">
-            在一个页面里测试知识库导入、会话聊天、命中来源和系统健康状态，方便你快速联调整条链路。
-          </p>
-        </div>
-        <div class="hero-card__actions">
-          <a class="button button--ghost" href="/docs">API Docs</a>
-          <a class="button button--primary" href="/traces">查看过程日志</a>
-        </div>
-      </section>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <a class="admin-brand" href="/">
+          <span class="admin-brand__eyebrow">Chat Robot</span>
+          <strong>控制台</strong>
+        </a>
+        <nav class="admin-nav">
+          <a class="admin-nav__link is-active" href="/">对话</a>
+          <a class="admin-nav__link" href="/knowledge">知识库</a>
+          <a class="admin-nav__link" href="/admin">系统概览</a>
+          <a class="admin-nav__link" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
+          <a class="admin-nav__link" href="/admin/compare">效果对比</a>
+          <a class="admin-nav__link" href="/docs">API 文档</a>
+        </nav>
+      </aside>
 
-      <section class="status-strip" id="status-strip">
-        <article class="status-tile">
-          <span class="status-tile__label">API 状态</span>
-          <strong class="status-tile__value" id="api-status">检测中</strong>
-        </article>
-        <article class="status-tile">
-          <span class="status-tile__label">运行模式</span>
-          <strong class="status-tile__value" id="runtime-mode">-</strong>
-        </article>
-        <article class="status-tile">
-          <span class="status-tile__label">请求轨迹数</span>
-          <strong class="status-tile__value" id="trace-count">-</strong>
-        </article>
-        <article class="status-tile">
-          <span class="status-tile__label">知识文档数</span>
-          <strong class="status-tile__value" id="knowledge-count">-</strong>
-        </article>
-      </section>
-
-      <section class="panel-grid panel-grid--triple">
-        <section class="panel">
-          <div class="panel__header">
-            <div>
-              <p class="panel__eyebrow">Session</p>
-              <h2>会话配置</h2>
-            </div>
-          </div>
-          <form class="stack-form" id="session-form">
-            <label class="stack-form__label" for="session-id">Session ID</label>
-            <div class="inline-row">
-              <input id="session-id" name="session-id" type="text" placeholder="例如 demo-session-001" />
-              <button class="button button--ghost button--small" id="new-session" type="button">新会话</button>
-            </div>
-            <p class="hint" id="session-hint">留空时会自动生成一个会话标识，并在当前页面持续复用。</p>
-          </form>
-        </section>
-
-        <section class="panel">
-          <div class="panel__header">
-            <div>
-              <p class="panel__eyebrow">Knowledge Base</p>
-              <h2>知识库导入</h2>
-            </div>
-          </div>
-          <form class="stack-form" id="knowledge-form">
-            <label class="stack-form__label" for="knowledge-files">上传文本文件</label>
-            <input id="knowledge-files" name="knowledge-files" type="file" accept=".txt,.md,.markdown,.json" multiple />
-            <label class="stack-form__label" for="knowledge-title">或手动录入标题</label>
-            <input id="knowledge-title" name="knowledge-title" type="text" placeholder="例如 部署说明" />
-            <label class="stack-form__label" for="knowledge-content">内容</label>
-            <textarea
-              id="knowledge-content"
-              name="knowledge-content"
-              rows="6"
-              placeholder="直接粘贴一段知识内容，点击导入即可入库。"
-            ></textarea>
-            <div class="composer__actions">
-              <span class="hint" id="knowledge-hint">支持多文件批量导入，当前调用 /api/v1/knowledge/ingest。</span>
-              <button class="button button--primary" id="knowledge-submit" type="submit">导入知识</button>
-            </div>
-          </form>
-          <div class="detail-card">
-            <div class="detail-card__title-row">
-              <h3>已入库文档</h3>
-              <button class="button button--ghost button--small" id="refresh-documents" type="button">刷新列表</button>
-            </div>
-            <div class="mini-list" id="document-list">
-              <div class="empty-state">还没有已入库文档。</div>
-            </div>
+      <main class="admin-main">
+        <section class="admin-topbar">
+          <div>
+            <p class="eyebrow">Conversation Console</p>
+            <h1>本地对话控制台</h1>
+            <p class="lede">专注做对话测试、来源检查和请求快照。知识库导入已经拆到独立页面，避免无关信息挤在一起。</p>
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel__header">
-            <div>
-              <p class="panel__eyebrow">Infra</p>
-              <h2>基础服务</h2>
+        <section class="panel-grid">
+          <section class="panel panel--conversation">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Conversation</p>
+                <h2>对话窗口</h2>
+              </div>
+              <button class="button button--ghost button--small" id="clear-chat" type="button">清空会话</button>
             </div>
-          </div>
-          <dl class="definition-list">
-            <div>
-              <dt>PostgreSQL</dt>
-              <dd id="postgres-status">-</dd>
+
+            <div class="detail-card detail-card--compact">
+              <form class="stack-form" id="session-form">
+                <label class="stack-form__label" for="session-id">Session ID</label>
+                <div class="inline-row inline-row--chat">
+                  <input id="session-id" name="session-id" type="text" placeholder="例如 demo-session-001" />
+                  <button class="button button--ghost button--small" id="new-session" type="button">新会话</button>
+                </div>
+                <p class="hint" id="session-hint">当前会话会在本页持续复用。</p>
+              </form>
             </div>
-            <div>
-              <dt>Qdrant</dt>
-              <dd id="qdrant-status">-</dd>
+
+            <div class="chat-feed" id="chat-feed">
+              <article class="bubble bubble--assistant">
+                <span class="bubble__role">Assistant</span>
+                <p>可以直接在这里测试问答、流式输出和来源引用效果。</p>
+              </article>
             </div>
-            <div>
-              <dt>MinIO</dt>
-              <dd id="minio-status">-</dd>
+
+            <form class="composer" id="chat-form">
+              <label class="composer__label" for="chat-input">输入问题</label>
+              <textarea
+                id="chat-input"
+                name="chat-input"
+                rows="4"
+                placeholder="例如：这个项目的部署方式是什么？"
+                required
+              ></textarea>
+              <div class="composer__actions">
+                <label class="toggle">
+                  <input id="stream-mode" type="checkbox" checked />
+                  <span>流式回答</span>
+                </label>
+                <span class="hint" id="chat-hint">当前模式：流式返回 /api/v1/chat/stream</span>
+                <button class="button button--primary" id="send-button" type="submit">发送请求</button>
+              </div>
+            </form>
+          </section>
+
+          <aside class="panel panel--inspector">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Inspector</p>
+                <h2>响应快照</h2>
+              </div>
             </div>
-          </dl>
+
+            <dl class="definition-list">
+              <div>
+                <dt>最新 request_id</dt>
+                <dd id="request-id">-</dd>
+              </div>
+              <div>
+                <dt>意图</dt>
+                <dd id="intent-value">-</dd>
+              </div>
+              <div>
+                <dt>是否需要 RAG</dt>
+                <dd id="need-rag-value">-</dd>
+              </div>
+              <div>
+                <dt>改写查询</dt>
+                <dd id="rewrite-query-value">-</dd>
+              </div>
+            </dl>
+
+            <div class="detail-card">
+              <h3>意图依据</h3>
+              <p id="intent-rationale">等待请求。</p>
+            </div>
+
+            <div class="detail-card">
+              <h3>命中来源</h3>
+              <div class="mini-list" id="source-list">
+                <div class="empty-state">当前还没有命中来源片段。</div>
+              </div>
+            </div>
+
+            <div class="detail-card">
+              <div class="detail-card__title-row">
+                <h3>原始响应</h3>
+                <a class="text-link" id="trace-link" href="/admin/traces">在日志页查看</a>
+              </div>
+              <pre class="code-block" id="raw-response">{}</pre>
+            </div>
+          </aside>
         </section>
-      </section>
+      </main>
+    </div>
 
-      <section class="panel-grid">
-        <section class="panel panel--conversation">
-          <div class="panel__header">
-            <div>
-              <p class="panel__eyebrow">Conversation</p>
-              <h2>对话窗口</h2>
-            </div>
-            <button class="button button--ghost button--small" id="clear-chat">清空会话</button>
-          </div>
-
-          <div class="chat-feed" id="chat-feed">
-            <article class="bubble bubble--assistant">
-              <span class="bubble__role">Assistant</span>
-              <p>你好，我已经准备好了。你可以先导入文档，再直接在这里测试检索和问答链路。</p>
-            </article>
-          </div>
-
-          <form class="composer" id="chat-form">
-            <label class="composer__label" for="chat-input">输入问题</label>
-            <textarea
-              id="chat-input"
-              name="chat-input"
-              rows="4"
-              placeholder="例如：这个项目的部署方式是什么？"
-              required
-            ></textarea>
-            <div class="composer__actions">
-              <span class="hint" id="chat-hint">接口目标：/api/v1/chat</span>
-              <button class="button button--primary" id="send-button" type="submit">发送请求</button>
-            </div>
-          </form>
-        </section>
-
-        <aside class="panel panel--inspector">
-          <div class="panel__header">
-            <div>
-              <p class="panel__eyebrow">Inspector</p>
-              <h2>响应快照</h2>
-            </div>
-          </div>
-
-          <dl class="definition-list">
-            <div>
-              <dt>最新 request_id</dt>
-              <dd id="request-id">-</dd>
-            </div>
-            <div>
-              <dt>意图</dt>
-              <dd id="intent-value">-</dd>
-            </div>
-            <div>
-              <dt>是否需要 RAG</dt>
-              <dd id="need-rag-value">-</dd>
-            </div>
-            <div>
-              <dt>改写查询</dt>
-              <dd id="rewrite-query-value">-</dd>
-            </div>
-          </dl>
-
-          <div class="detail-card">
-            <h3>意图依据</h3>
-            <p id="intent-rationale">等待请求。</p>
-          </div>
-
-          <div class="detail-card">
-            <h3>命中来源</h3>
-            <div class="mini-list" id="source-list">
-              <div class="empty-state">当前还没有来源片段。</div>
-            </div>
-          </div>
-
-          <div class="detail-card">
-            <div class="detail-card__title-row">
-              <h3>原始响应</h3>
-              <a class="text-link" id="trace-link" href="/traces">在日志页查看</a>
-            </div>
-            <pre class="code-block" id="raw-response">{}</pre>
-          </div>
-        </aside>
-      </section>
-    </main>
-
-    <script src="/static/js/chat-page.js" defer></script>
+    <script src="/static/js/chat-console.js" defer></script>
   </body>
 </html>

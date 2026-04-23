@@ -10,6 +10,7 @@ class InferenceGenerateRequest(BaseModel):
     intent: IntentDecision
     sources: list[SourceChunk] = Field(default_factory=list)
     max_new_tokens: int | None = Field(default=None, ge=1)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
 
 
 class InferenceGenerateResponse(BaseModel):

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>流程日志</title>
+    <link rel="stylesheet" href="/static/css/app.css?v=20260423-admin4" />
+  </head>
+  <body class="app-shell app-shell--admin">
+    <div class="background-grid" aria-hidden="true"></div>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <a class="admin-brand" href="/">
+          <span class="admin-brand__eyebrow">Chat Robot</span>
+          <strong>控制台</strong>
+        </a>
+        <nav class="admin-nav">
+          <a class="admin-nav__link" href="/">对话</a>
+          <a class="admin-nav__link" href="/knowledge">知识库</a>
+          <a class="admin-nav__link" href="/admin">系统概览</a>
+          <a class="admin-nav__link is-active" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
+          <a class="admin-nav__link" href="/admin/compare">效果对比</a>
+          <a class="admin-nav__link" href="/docs">API 文档</a>
+        </nav>
+      </aside>
+
+      <main class="admin-main">
+        <section class="admin-topbar">
+          <div>
+            <p class="eyebrow">Request Timeline</p>
+            <h1>流程日志</h1>
+            <p class="lede">按页查看请求，默认只加载局部步骤和截断输出，需要时再展开完整执行链路。</p>
+          </div>
+          <button class="button button--primary" id="trace-refresh" type="button">刷新日志</button>
+        </section>
+
+        <section class="status-strip">
+          <article class="status-tile">
+            <span class="status-tile__label">当前请求</span>
+            <strong class="status-tile__value" id="selected-trace">-</strong>
+          </article>
+          <article class="status-tile">
+            <span class="status-tile__label">状态</span>
+            <strong class="status-tile__value" id="selected-status">-</strong>
+          </article>
+          <article class="status-tile">
+            <span class="status-tile__label">总耗时</span>
+            <strong class="status-tile__value" id="selected-latency">-</strong>
+          </article>
+          <article class="status-tile">
+            <span class="status-tile__label">步骤数</span>
+            <strong class="status-tile__value" id="selected-steps">-</strong>
+          </article>
+        </section>
+
+        <section class="panel-grid panel-grid--wide">
+          <section class="panel panel--list">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Filters</p>
+                <h2>请求列表</h2>
+              </div>
+              <div class="inline-row inline-row--compact">
+                <input id="trace-session-filter" type="text" placeholder="按 session_id 筛选" />
+                <select id="trace-status-filter">
+                  <option value="">全部状态</option>
+                  <option value="completed">completed</option>
+                  <option value="running">running</option>
+                  <option value="error">error</option>
+                </select>
+              </div>
+            </div>
+            <div class="trace-list" id="trace-list"></div>
+            <div class="mini-list__footer">
+              <span class="hint" id="trace-page-summary">-</span>
+              <div class="mini-list__pager">
+                <button class="button button--ghost button--small" id="trace-prev-page" type="button">上一页</button>
+                <button class="button button--ghost button--small" id="trace-next-page" type="button">下一页</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel panel--detail">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Timeline</p>
+                <h2>执行详情</h2>
+              </div>
+              <button class="button button--ghost button--small" id="trace-view-all" type="button">查看全部</button>
+            </div>
+
+            <div class="trace-summary" id="trace-summary">
+              <p>选择左侧一条请求以查看详情。</p>
+            </div>
+
+            <div class="timeline" id="trace-timeline"></div>
+
+            <div class="detail-split">
+              <div class="detail-card">
+                <h3>最终输出</h3>
+                <pre class="code-block" id="trace-output">-</pre>
+              </div>
+              <div class="detail-card">
+                <h3>原始详情</h3>
+                <pre class="code-block" id="trace-raw">-</pre>
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/js/admin-common.js?v=20260423-admin4" defer></script>
+    <script src="/static/js/admin-traces.js?v=20260423-admin4" defer></script>
+  </body>
+</html>

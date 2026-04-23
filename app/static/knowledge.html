@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>知识库控制台</title>
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body class="app-shell app-shell--admin">
+    <div class="background-grid" aria-hidden="true"></div>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <a class="admin-brand" href="/">
+          <span class="admin-brand__eyebrow">Chat Robot</span>
+          <strong>控制台</strong>
+        </a>
+        <nav class="admin-nav">
+          <a class="admin-nav__link" href="/">对话</a>
+          <a class="admin-nav__link is-active" href="/knowledge">知识库</a>
+          <a class="admin-nav__link" href="/admin">系统概览</a>
+          <a class="admin-nav__link" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
+          <a class="admin-nav__link" href="/admin/compare">效果对比</a>
+          <a class="admin-nav__link" href="/docs">API 文档</a>
+        </nav>
+      </aside>
+
+      <main class="admin-main">
+        <section class="admin-topbar">
+          <div>
+            <p class="eyebrow">Knowledge Console</p>
+            <h1>知识库控制台</h1>
+            <p class="lede">把文件导入、任务进度和文档清单独立到一个页面里，方便专门处理入库流程，不打扰聊天测试。</p>
+          </div>
+          <button class="button button--ghost" id="refresh-documents" type="button">刷新文档</button>
+        </section>
+
+        <section class="status-strip">
+          <article class="status-tile">
+            <span class="status-tile__label">文档总数</span>
+            <strong class="status-tile__value" id="knowledge-count">-</strong>
+          </article>
+          <article class="status-tile">
+            <span class="status-tile__label">当前阶段</span>
+            <strong class="status-tile__value" id="ingest-status-inline">待命</strong>
+          </article>
+          <article class="status-tile">
+            <span class="status-tile__label">进度</span>
+            <strong class="status-tile__value" id="ingest-percent-inline">0%</strong>
+          </article>
+        </section>
+
+        <section class="panel-grid">
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Ingest</p>
+                <h2>导入知识</h2>
+              </div>
+            </div>
+
+            <form class="stack-form" id="knowledge-form">
+              <label class="stack-form__label" for="knowledge-files">上传文本文件</label>
+              <input id="knowledge-files" name="knowledge-files" type="file" accept=".txt,.md,.markdown,.json" multiple />
+              <label class="stack-form__label" for="knowledge-title">或手动录入标题</label>
+              <input id="knowledge-title" name="knowledge-title" type="text" placeholder="例如 部署说明" />
+              <label class="stack-form__label" for="knowledge-content">内容</label>
+              <textarea
+                id="knowledge-content"
+                name="knowledge-content"
+                rows="8"
+                placeholder="直接粘贴一段知识内容，点击导入即可入库。"
+              ></textarea>
+              <div class="composer__actions">
+                <span class="hint" id="knowledge-hint">支持多文件批量导入，当前调用 /api/v1/knowledge/ingest。</span>
+                <button class="button button--primary" id="knowledge-submit" type="submit">导入知识</button>
+              </div>
+            </form>
+
+            <div class="ingest-progress" id="ingest-progress" hidden>
+              <div class="ingest-progress__header">
+                <span class="ingest-progress__stage" id="ingest-stage">排队中</span>
+                <strong class="ingest-progress__percent" id="ingest-percent">0%</strong>
+              </div>
+              <div class="ingest-progress__bar">
+                <div class="ingest-progress__fill" id="ingest-fill"></div>
+              </div>
+              <p class="ingest-progress__meta" id="ingest-meta">等待任务开始。</p>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Documents</p>
+                <h2>已入库文档</h2>
+              </div>
+            </div>
+            <div class="mini-list" id="document-list">
+              <div class="empty-state">还没有已入库文档。</div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/js/knowledge-page.js" defer></script>
+  </body>
+</html>

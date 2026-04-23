@@ -91,3 +91,47 @@ class GenerationRecord(Base):
     used_source_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     llm_output: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class KnowledgeIngestJobRecord(Base):
+    __tablename__ = "knowledge_ingest_jobs"
+
+    job_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    submitted_documents: Mapped[int] = mapped_column(Integer, nullable=False)
+    processed_documents: Mapped[int] = mapped_column(Integer, default=0)
+    ingested_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_documents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_chunks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    processed_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    current_stage: Mapped[str] = mapped_column(String(32), default="queued")
+    current_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    document_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    documents: Mapped[list["KnowledgeIngestDocumentRecord"]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+    )
+
+
+class KnowledgeIngestDocumentRecord(Base):
+    __tablename__ = "knowledge_ingest_documents"
+
+    ingest_document_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("knowledge_ingest_jobs.job_id"),
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    document_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    job: Mapped["KnowledgeIngestJobRecord"] = relationship(back_populates="documents")

@@ -7,14 +7,28 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     environment:
       APP_ENV: docker
       RUNTIME_MODE: remote_inference
       INFERENCE_SERVICE_URL: http://inference:8001
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: chat_robot
+      POSTGRES_USER: chat_robot
+      POSTGRES_PASSWORD: chat_robot
+      POSTGRES_DSN: postgresql+psycopg://chat_robot:chat_robot@postgres:5432/chat_robot
+      QDRANT_URL: http://qdrant:6333
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "false"
+      MINIO_BUCKET: chat-robot
     ports:
       - "8000:8000"
     volumes:
       - .:/app
+      - ${HOST_MODEL_ROOT:-/root/models}:${HOST_MODEL_ROOT:-/root/models}:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,10 +65,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    command: ["uvicorn", "app.inference.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    command: ["uvicorn", "app.inference.main:app", "--host", "0.0.0.0", "--port", "8001", "--no-access-log"]
     environment:
       APP_ENV: docker
       INFERENCE_RUNTIME_MODE: local_hf
+      HOST_MODEL_ROOT: ${HOST_MODEL_ROOT:-/root/models}
+      LLM_MODEL_PATH: ${LLM_MODEL_PATH:-/root/models/Qwen3-8B}
+      INTENT_MODEL_PATH: ${INTENT_MODEL_PATH:-/root/models/Qwen2.5-1.5B-Instruct}
     ports:
       - "8001:8001"
     volumes:
@@ -146,8 +163,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: ["server", "/data", "--console-address", ":9001"]
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_API_PORT:-19000}:9000"
+      - "${MINIO_CONSOLE_PORT:-19001}:9001"
     volumes:
       - minio_data:/data
     deploy:

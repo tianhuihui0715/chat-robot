@@ -2,7 +2,6 @@ const state = {
   messages: [],
   lastResponse: null,
   sessionId: crypto.randomUUID(),
-  lastIngestedIds: new Set(),
   sourcePagination: {
     items: [],
     page: 1,
@@ -15,10 +14,6 @@ const form = document.getElementById("chat-form");
 const input = document.getElementById("chat-input");
 const sendButton = document.getElementById("send-button");
 const clearButton = document.getElementById("clear-chat");
-const apiStatus = document.getElementById("api-status");
-const runtimeMode = document.getElementById("runtime-mode");
-const traceCount = document.getElementById("trace-count");
-const knowledgeCount = document.getElementById("knowledge-count");
 const requestId = document.getElementById("request-id");
 const intentValue = document.getElementById("intent-value");
 const needRagValue = document.getElementById("need-rag-value");
@@ -31,35 +26,8 @@ const sessionForm = document.getElementById("session-form");
 const sessionIdInput = document.getElementById("session-id");
 const newSessionButton = document.getElementById("new-session");
 const sessionHint = document.getElementById("session-hint");
-const knowledgeForm = document.getElementById("knowledge-form");
-const knowledgeFiles = document.getElementById("knowledge-files");
-const knowledgeTitle = document.getElementById("knowledge-title");
-const knowledgeContent = document.getElementById("knowledge-content");
-const knowledgeSubmit = document.getElementById("knowledge-submit");
-const knowledgeHint = document.getElementById("knowledge-hint");
-const documentList = document.getElementById("document-list");
-const refreshDocumentsButton = document.getElementById("refresh-documents");
-const postgresStatus = document.getElementById("postgres-status");
-const qdrantStatus = document.getElementById("qdrant-status");
-const minioStatus = document.getElementById("minio-status");
 const streamMode = document.getElementById("stream-mode");
 const chatHint = document.getElementById("chat-hint");
-const ingestProgress = document.getElementById("ingest-progress");
-const ingestStage = document.getElementById("ingest-stage");
-const ingestPercent = document.getElementById("ingest-percent");
-const ingestFill = document.getElementById("ingest-fill");
-const ingestMeta = document.getElementById("ingest-meta");
-
-const INGEST_POLL_INTERVAL_QUEUED_MS = 3000;
-const INGEST_POLL_INTERVAL_RUNNING_MS = 5000;
-
-apiStatus.textContent = "disabled";
-runtimeMode.textContent = "-";
-traceCount.textContent = "-";
-knowledgeCount.textContent = "-";
-postgresStatus.textContent = "disabled";
-qdrantStatus.textContent = "disabled";
-minioStatus.textContent = "disabled";
 
 function appendBubble(role, text) {
   const article = document.createElement("article");
@@ -109,7 +77,7 @@ function resetConversation() {
   feed.innerHTML = `
     <article class="bubble bubble--assistant">
       <span class="bubble__role">Assistant</span>
-      <p>可以先导入知识内容，再在这里测试检索、重排和最终回答链路。</p>
+      <p>可以直接在这里测试问答、流式输出和来源引用效果。</p>
     </article>
   `;
   requestId.textContent = "-";
@@ -191,230 +159,6 @@ function renderSourcePage() {
   footer.appendChild(summary);
   footer.appendChild(pager);
   sourceList.appendChild(footer);
-}
-
-function resetIngestProgress() {
-  ingestProgress.hidden = true;
-  ingestStage.textContent = "排队中";
-  ingestPercent.textContent = "0%";
-  ingestFill.style.width = "0%";
-  ingestMeta.textContent = "等待任务开始。";
-}
-
-function updateIngestProgress(data) {
-  ingestProgress.hidden = false;
-
-  const stageLabel = formatIngestStage(data.current_stage, data.status);
-  const percentValue = calculateIngestPercent(data);
-  ingestStage.textContent = stageLabel;
-  ingestPercent.textContent = `${percentValue}%`;
-  ingestFill.style.width = `${percentValue}%`;
-
-  const metaParts = [];
-  if (data.current_title) {
-    metaParts.push(`当前文档：${data.current_title}`);
-  }
-  if (typeof data.total_chunks === "number" && data.total_chunks > 0) {
-    metaParts.push(`chunks：${data.processed_chunks ?? 0}/${data.total_chunks}`);
-  } else {
-    metaParts.push(`文档：${data.processed_documents ?? 0}/${data.submitted_documents ?? 0}`);
-  }
-  ingestMeta.textContent = metaParts.join("，") || "等待任务开始。";
-}
-
-function calculateIngestPercent(data) {
-  if (data.status === "completed") {
-    return 100;
-  }
-  if (typeof data.total_chunks === "number" && data.total_chunks > 0) {
-    return Math.min(99, Math.round(((data.processed_chunks ?? 0) / data.total_chunks) * 100));
-  }
-  if (typeof data.submitted_documents === "number" && data.submitted_documents > 0) {
-    return Math.min(
-      99,
-      Math.round(((data.processed_documents ?? 0) / data.submitted_documents) * 100),
-    );
-  }
-  return data.status === "running" ? 5 : 0;
-}
-
-function formatIngestStage(stage, status) {
-  if (status === "queued") {
-    return "排队中";
-  }
-
-  const labels = {
-    preparing: "准备中",
-    chunking: "切片中",
-    processing: "处理中",
-    embedding: "向量化中",
-    upserting: "写入知识库中",
-    completed: "已完成",
-    failed: "失败",
-  };
-  return labels[stage] || "执行中";
-}
-
-function readFileAsText(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error ?? new Error(`读取文件失败：${file.name}`));
-    reader.readAsText(file, "utf-8");
-  });
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function renderDocuments(documents) {
-  knowledgeCount.textContent = String(documents.length);
-  if (!documents.length) {
-    documentList.innerHTML = '<div class="empty-state">还没有已入库文档。</div>';
-    return;
-  }
-
-  documentList.innerHTML = "";
-  const ordered = [...documents].reverse();
-  for (const entry of ordered) {
-    const item = document.createElement("article");
-    item.className = "mini-list__item";
-    if (state.lastIngestedIds.has(entry.document_id)) {
-      item.style.borderColor = "rgba(25, 211, 255, 0.55)";
-      item.style.boxShadow = "inset 0 0 0 1px rgba(25, 211, 255, 0.22)";
-    }
-    item.innerHTML = `
-      <div class="mini-list__row">
-        <strong>${entry.title}</strong>
-        <span class="hint">${entry.document_id}</span>
-      </div>
-    `;
-    documentList.appendChild(item);
-  }
-}
-
-async function refreshDocuments() {
-  try {
-    const response = await fetch("/api/v1/knowledge/documents");
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const documents = await response.json();
-    renderDocuments(documents);
-  } catch (error) {
-    documentList.innerHTML = `<div class="empty-state">加载文档失败：${error.message}</div>`;
-  }
-}
-
-async function waitForIngestJob(jobId) {
-  while (true) {
-    const response = await fetch(`/api/v1/knowledge/ingest/${jobId}`);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-    updateIngestProgress(data);
-
-    if (data.status === "completed" || data.status === "failed") {
-      return data;
-    }
-
-    knowledgeHint.textContent = `导入任务 ${jobId.slice(0, 8)} ${formatIngestStage(
-      data.current_stage,
-      data.status,
-    )}`;
-
-    await sleep(
-      data.status === "running"
-        ? INGEST_POLL_INTERVAL_RUNNING_MS
-        : INGEST_POLL_INTERVAL_QUEUED_MS,
-    );
-  }
-}
-
-async function ingestKnowledge(event) {
-  event.preventDefault();
-  knowledgeSubmit.disabled = true;
-  resetIngestProgress();
-  knowledgeHint.textContent = "正在整理上传内容并创建导入任务，请稍等...";
-
-  try {
-    const documents = [];
-    const files = Array.from(knowledgeFiles.files ?? []);
-
-    for (const file of files) {
-      const content = (await readFileAsText(file)).trim();
-      if (!content) {
-        continue;
-      }
-      documents.push({
-        title: file.name,
-        content,
-        metadata: {
-          source: "upload",
-          file_name: file.name,
-        },
-      });
-    }
-
-    const manualTitle = knowledgeTitle.value.trim();
-    const manualContent = knowledgeContent.value.trim();
-    if (manualContent) {
-      documents.push({
-        title: manualTitle || `manual-${new Date().toISOString()}`,
-        content: manualContent,
-        metadata: {
-          source: "manual",
-        },
-      });
-    }
-
-    if (!documents.length) {
-      throw new Error("请先选择文件或输入知识内容。");
-    }
-
-    const totalChars = documents.reduce((sum, entry) => sum + entry.content.length, 0);
-    knowledgeHint.textContent = `正在提交 ${documents.length} 篇内容，累计 ${totalChars} 个字符。`;
-
-    const response = await fetch("/api/v1/knowledge/ingest", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ documents }),
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-    knowledgeHint.textContent = `导入任务 ${data.job_id.slice(0, 8)} 已创建，等待后台处理。`;
-    updateIngestProgress(data);
-
-    const finalStatus = await waitForIngestJob(data.job_id);
-    if (finalStatus.status !== "completed") {
-      throw new Error(finalStatus.error || "知识库导入失败。");
-    }
-
-    updateIngestProgress(finalStatus);
-    state.lastIngestedIds = new Set(finalStatus.document_ids ?? []);
-    await refreshDocuments();
-    knowledgeHint.textContent = `导入成功：${finalStatus.ingested_count} 篇，当前共 ${finalStatus.total_documents ?? "-"} 篇文档。`;
-    knowledgeFiles.value = "";
-    knowledgeTitle.value = "";
-    knowledgeContent.value = "";
-  } catch (error) {
-    knowledgeHint.textContent = `导入失败：${error.message}`;
-    ingestProgress.hidden = false;
-    ingestStage.textContent = "失败";
-    ingestPercent.textContent = "0%";
-    ingestFill.style.width = "0%";
-    ingestMeta.textContent = error.message;
-  } finally {
-    knowledgeSubmit.disabled = false;
-  }
 }
 
 function applyFinalResponse(finalResponse) {
@@ -572,11 +316,7 @@ newSessionButton.addEventListener("click", () => {
   resetConversation();
 });
 streamMode.addEventListener("change", updateChatHint);
-knowledgeForm.addEventListener("submit", ingestKnowledge);
-refreshDocumentsButton.addEventListener("click", refreshDocuments);
 
 setSessionHint();
 updateChatHint();
 resetConversation();
-resetIngestProgress();
-refreshDocuments();

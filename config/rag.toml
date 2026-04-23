@@ -2,5 +2,5 @@
 top_k = 4
 score_threshold = 0.1
 collection_name = "knowledge_chunks"
-chunk_size = 500
-chunk_overlap = 80
+chunk_size = 1200
+chunk_overlap = 120

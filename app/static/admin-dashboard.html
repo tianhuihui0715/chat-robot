@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>系统概览</title>
+    <link rel="stylesheet" href="/static/css/app.css?v=20260423-admin4" />
+  </head>
+  <body class="app-shell app-shell--admin">
+    <div class="background-grid" aria-hidden="true"></div>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <a class="admin-brand" href="/">
+          <span class="admin-brand__eyebrow">Chat Robot</span>
+          <strong>控制台</strong>
+        </a>
+        <nav class="admin-nav">
+          <a class="admin-nav__link" href="/">对话</a>
+          <a class="admin-nav__link" href="/knowledge">知识库</a>
+          <a class="admin-nav__link is-active" href="/admin">系统概览</a>
+          <a class="admin-nav__link" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
+          <a class="admin-nav__link" href="/admin/compare">效果对比</a>
+          <a class="admin-nav__link" href="/docs">API 文档</a>
+        </nav>
+      </aside>
+
+      <main class="admin-main">
+        <section class="admin-topbar">
+          <div>
+            <p class="eyebrow">Overview</p>
+            <h1>系统概览</h1>
+            <p class="lede">这里集中看服务状态、知识库规模、当前 RAG 策略和最近请求，适合作为整个系统的总览入口。</p>
+          </div>
+          <button class="button button--primary" id="dashboard-refresh" type="button">刷新概览</button>
+        </section>
+
+        <section class="status-strip">
+          <article class="status-tile">
+            <span class="status-tile__label">服务状态</span>
+            <strong class="status-tile__value" id="overview-status">-</strong>
+          </article>
+          <article class="status-tile">
+            <span class="status-tile__label">排队请求</span>
+            <strong class="status-tile__value" id="overview-queue">-</strong>
+          </article>
+          <article class="status-tile">
+            <span class="status-tile__label">已入库文档</span>
+            <strong class="status-tile__value" id="overview-documents">-</strong>
+          </article>
+          <article class="status-tile">
+            <span class="status-tile__label">当前 Top K</span>
+            <strong class="status-tile__value" id="overview-top-k">-</strong>
+          </article>
+        </section>
+
+        <section class="panel-grid">
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Runtime</p>
+                <h2>服务状态</h2>
+              </div>
+            </div>
+            <dl class="definition-list" id="runtime-details"></dl>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">RAG</p>
+                <h2>当前检索策略</h2>
+              </div>
+              <a class="text-link" href="/admin/rag">进入配置</a>
+            </div>
+            <dl class="definition-list" id="rag-details"></dl>
+          </section>
+        </section>
+
+        <section class="panel-grid">
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Knowledge Base</p>
+                <h2>最近文档</h2>
+              </div>
+              <a class="text-link" href="/knowledge">进入知识库</a>
+            </div>
+            <div class="mini-list" id="document-preview"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="panel__eyebrow">Recent Requests</p>
+                <h2>最近请求</h2>
+              </div>
+              <a class="text-link" href="/admin/traces">查看全部</a>
+            </div>
+            <div class="mini-list" id="recent-traces"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/js/admin-common.js?v=20260423-admin4" defer></script>
+    <script src="/static/js/admin-dashboard.js?v=20260423-admin4" defer></script>
+  </body>
+</html>
