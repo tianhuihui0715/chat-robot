@@ -62,7 +62,11 @@ class KnowledgeIngestStore:
                 job_id=job_id,
                 title=document.title,
                 content=document.content,
-                metadata_json=document.metadata,
+                metadata_json={
+                    **document.metadata,
+                    "knowledge_base_id": document.knowledge_base_id,
+                    "knowledge_base_name": document.knowledge_base_name,
+                },
                 document_order=index,
             )
             for index, document in enumerate(documents, start=1)
@@ -94,12 +98,21 @@ class KnowledgeIngestStore:
             )
             return list(session.scalars(stmt).all())
 
+    def list_active_jobs(self) -> list[PersistedKnowledgeIngestJob]:
+        with self._session_factory() as session:
+            stmt = (
+                select(KnowledgeIngestJobRecord)
+                .where(KnowledgeIngestJobRecord.status.in_(("queued", "running")))
+                .order_by(KnowledgeIngestJobRecord.created_at.asc())
+            )
+            return [self._to_job(record) for record in session.scalars(stmt).all()]
+
     def get_latest_active_job(self) -> PersistedKnowledgeIngestJob | None:
         with self._session_factory() as session:
             stmt = (
                 select(KnowledgeIngestJobRecord)
                 .where(KnowledgeIngestJobRecord.status.in_(("queued", "running")))
-                .order_by(KnowledgeIngestJobRecord.updated_at.desc(), KnowledgeIngestJobRecord.created_at.desc())
+                .order_by(KnowledgeIngestJobRecord.status.desc(), KnowledgeIngestJobRecord.created_at.asc())
             )
             record = session.scalars(stmt).first()
             if record is None:
@@ -119,6 +132,8 @@ class KnowledgeIngestStore:
                     title=row.title,
                     content=row.content,
                     metadata={key: str(value) for key, value in (row.metadata_json or {}).items()},
+                    knowledge_base_id=str((row.metadata_json or {}).get("knowledge_base_id") or "default"),
+                    knowledge_base_name=str((row.metadata_json or {}).get("knowledge_base_name") or "默认知识库"),
                 )
                 for row in rows
             ]
@@ -128,6 +143,8 @@ class KnowledgeIngestStore:
             record = session.get(KnowledgeIngestJobRecord, job_id)
             if record is None:
                 raise KeyError(job_id)
+            if record.status == "cancelled":
+                raise RuntimeError("Ingest job has been cancelled.")
             now = utcnow()
             record.status = "running"
             record.current_stage = "preparing"
@@ -152,6 +169,8 @@ class KnowledgeIngestStore:
             record = session.get(KnowledgeIngestJobRecord, job_id)
             if record is None:
                 raise KeyError(job_id)
+            if record.status == "cancelled":
+                raise RuntimeError("Ingest job has been cancelled.")
             if current_stage is not None:
                 record.current_stage = current_stage
             if current_title is not None:
@@ -178,6 +197,8 @@ class KnowledgeIngestStore:
             record = session.get(KnowledgeIngestJobRecord, job_id)
             if record is None:
                 raise KeyError(job_id)
+            if record.status == "cancelled":
+                return self._to_job(record)
             now = utcnow()
             record.status = "completed"
             record.current_stage = "completed"
@@ -186,6 +207,23 @@ class KnowledgeIngestStore:
             record.ingested_count = len(document_ids)
             record.document_ids = document_ids
             record.total_documents = total_documents
+            record.updated_at = now
+            record.completed_at = now
+            session.commit()
+            session.refresh(record)
+            return self._to_job(record)
+
+    def mark_job_cancelled(self, job_id: str) -> PersistedKnowledgeIngestJob:
+        with self._session_factory() as session:
+            record = session.get(KnowledgeIngestJobRecord, job_id)
+            if record is None:
+                raise KeyError(job_id)
+            if record.status in {"completed", "failed", "cancelled"}:
+                return self._to_job(record)
+            now = utcnow()
+            record.status = "cancelled"
+            record.current_stage = "cancelled"
+            record.error = "Cancelled by user."
             record.updated_at = now
             record.completed_at = now
             session.commit()

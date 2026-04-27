@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>本地对话控制台</title>
-    <link rel="stylesheet" href="/static/css/app.css" />
+    <link rel="stylesheet" href="/static/css/app.css?v=20260425-rerank-toggle1" />
   </head>
   <body class="app-shell app-shell--admin">
     <div class="background-grid" aria-hidden="true"></div>
@@ -19,8 +19,9 @@
           <a class="admin-nav__link" href="/knowledge">知识库</a>
           <a class="admin-nav__link" href="/admin">系统概览</a>
           <a class="admin-nav__link" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link" href="/admin/performance">性能统计</a>
           <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
-          <a class="admin-nav__link" href="/admin/compare">效果对比</a>
+          <a class="admin-nav__link" href="/admin/compare">RAG 评测</a>
           <a class="admin-nav__link" href="/docs">API 文档</a>
         </nav>
       </aside>
@@ -75,6 +76,10 @@
                 <label class="toggle">
                   <input id="stream-mode" type="checkbox" checked />
                   <span>流式回答</span>
+                </label>
+                <label class="toggle">
+                  <input id="rerank-mode" type="checkbox" checked />
+                  <span>启用重排</span>
                 </label>
                 <span class="hint" id="chat-hint">当前模式：流式返回 /api/v1/chat/stream</span>
                 <button class="button button--primary" id="send-button" type="submit">发送请求</button>
@@ -133,6 +138,6 @@
       </main>
     </div>
 
-    <script src="/static/js/chat-console.js" defer></script>
+    <script src="/static/js/chat-console.js?v=20260425-rerank-toggle1" defer></script>
   </body>
 </html>

@@ -16,6 +16,45 @@ class GenerationRequest:
     temperature: float | None = None
 
 
+def build_generation_prompt_messages(request: GenerationRequest) -> list[dict[str, str]]:
+    system_parts = [
+        "你是一个本地部署的中文 AI 助手。",
+        "请直接给出答案，不要输出思考过程，也不要输出 <think> 标签。",
+    ]
+
+    if request.sources:
+        source_sections = []
+        for index, source in enumerate(request.sources, start=1):
+            citation_index = source.metadata.get("citation_index", str(index))
+            source_sections.append(
+                f"[{citation_index}] id={source.document_id} title={source.title}\n{source.content}"
+            )
+        system_parts.append(
+            "回答时优先参考以下知识片段；如果依据不足，请明确说明。"
+            "凡是依据知识片段生成的事实、结论或列表项，必须在对应句子末尾标注来源编号，格式为【1】、【2】。"
+            "如果同一句同时依据多个来源，可以写成【1】【3】。\n\n"
+            + "\n\n".join(source_sections)
+        )
+
+    extra_system_messages = [
+        message.content.strip()
+        for message in request.messages
+        if message.role == "system" and message.content.strip()
+    ]
+    if extra_system_messages:
+        system_parts.append("额外约束：\n" + "\n".join(extra_system_messages))
+
+    prompt_messages: list[dict[str, str]] = [
+        {"role": "system", "content": "\n\n".join(system_parts)}
+    ]
+    prompt_messages.extend(
+        {"role": message.role, "content": message.content}
+        for message in request.messages
+        if message.role in {"user", "assistant"}
+    )
+    return prompt_messages
+
+
 class GenerationBackend(Protocol):
     async def start(self) -> None:
         ...

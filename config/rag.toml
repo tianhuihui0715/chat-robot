@@ -1,6 +1,12 @@
 [rag]
 top_k = 4
 score_threshold = 0.1
+rerank_candidate_limit = 12
 collection_name = "knowledge_chunks"
+retrieval_mode = "hybrid"
+bm25_top_k = 8
+bm25_title_boost = 2.0
+rrf_k = 60
+rrf_min_score = 0.016
 chunk_size = 1200
 chunk_overlap = 120

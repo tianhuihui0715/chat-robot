@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>性能统计</title>
+    <link rel="stylesheet" href="/static/css/app.css?v=20260425-performance1" />
+  </head>
+  <body class="app-shell app-shell--admin">
+    <div class="background-grid" aria-hidden="true"></div>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <a class="admin-brand" href="/">
+          <span class="admin-brand__eyebrow">Chat Robot</span>
+          <strong>控制台</strong>
+        </a>
+        <nav class="admin-nav">
+          <a class="admin-nav__link" href="/">对话</a>
+          <a class="admin-nav__link" href="/knowledge">知识库</a>
+          <a class="admin-nav__link" href="/admin">系统概览</a>
+          <a class="admin-nav__link" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link is-active" href="/admin/performance">性能统计</a>
+          <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
+          <a class="admin-nav__link" href="/admin/compare">RAG 评测</a>
+          <a class="admin-nav__link" href="/docs">API 文档</a>
+        </nav>
+      </aside>
+
+      <main class="admin-main">
+        <section class="admin-topbar">
+          <div>
+            <p class="eyebrow">Performance</p>
+            <h1>性能统计</h1>
+          </div>
+          <button class="button button--primary" id="performance-refresh" type="button">刷新</button>
+        </section>
+
+        <section class="panel">
+          <div class="inline-row inline-row--compact">
+            <label class="stack-form__label">
+              Request ID
+              <input id="performance-request-id" type="text" placeholder="默认加载最近一条请求" />
+            </label>
+            <button class="button button--ghost" id="performance-load" type="button">查看</button>
+          </div>
+          <p class="hint" id="performance-meta">等待加载。</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Single Request</p>
+              <h2>单次请求耗时</h2>
+            </div>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>环节</th>
+                <th>耗时 (ms)</th>
+              </tr>
+            </thead>
+            <tbody id="performance-table-body">
+              <tr><td>意图判断</td><td>-</td></tr>
+              <tr><td>embedding</td><td>-</td></tr>
+              <tr><td>Qdrant 检索</td><td>-</td></tr>
+              <tr><td>重排</td><td>-</td></tr>
+              <tr><td>首 token 生成</td><td>-</td></tr>
+              <tr><td>总耗时</td><td>-</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/js/admin-performance.js?v=20260425-performance1" defer></script>
+  </body>
+</html>

@@ -11,6 +11,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
     session_id: str | None = None
+    use_reranker: bool | None = None
 
 
 class SourceChunk(BaseModel):
@@ -26,6 +27,8 @@ class IntentDecision(BaseModel):
     need_rag: bool
     rewrite_query: str
     rationale: str
+    knowledge_base_id: str | None = None
+    knowledge_base_name: str | None = None
 
 
 class ChatResponse(BaseModel):

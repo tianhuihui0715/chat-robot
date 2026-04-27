@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>知识库控制台</title>
-    <link rel="stylesheet" href="/static/css/app.css" />
+    <link rel="stylesheet" href="/static/css/app.css?v=20260426-kb-scope1" />
   </head>
   <body class="app-shell app-shell--admin">
     <div class="background-grid" aria-hidden="true"></div>
@@ -19,8 +19,9 @@
           <a class="admin-nav__link is-active" href="/knowledge">知识库</a>
           <a class="admin-nav__link" href="/admin">系统概览</a>
           <a class="admin-nav__link" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link" href="/admin/performance">性能统计</a>
           <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
-          <a class="admin-nav__link" href="/admin/compare">效果对比</a>
+          <a class="admin-nav__link" href="/admin/compare">RAG 评测</a>
           <a class="admin-nav__link" href="/docs">API 文档</a>
         </nav>
       </aside>
@@ -60,8 +61,20 @@
             </div>
 
             <form class="stack-form" id="knowledge-form">
-              <label class="stack-form__label" for="knowledge-files">上传文本文件</label>
-              <input id="knowledge-files" name="knowledge-files" type="file" accept=".txt,.md,.markdown,.json" multiple />
+              <label class="stack-form__label" for="knowledge-base-name">知识库名称</label>
+              <input id="knowledge-base-name" name="knowledge-base-name" type="text" placeholder="例如 VPN 文档库" value="默认知识库" />
+              <label class="stack-form__label" for="knowledge-base-id">知识库标识</label>
+              <input id="knowledge-base-id" name="knowledge-base-id" type="text" placeholder="例如 vpn" value="default" />
+              <p class="hint">同一类文档使用同一个知识库标识。对话时系统会根据问题内容自动路由到匹配的知识库。</p>
+              <label class="stack-form__label" for="knowledge-files">上传知识文件</label>
+              <input
+                id="knowledge-files"
+                name="knowledge-files"
+                type="file"
+                accept=".txt,.md,.markdown,.json,.jsonl,.csv,.tsv,.log,.yaml,.yml,.xml,.html,.htm,.docx,.xlsx,.pdf"
+                multiple
+              />
+              <p class="hint">支持 txt、md、json/jsonl、csv/tsv、yaml/yml、xml/html、docx、xlsx、pdf。传统 .doc 暂不支持，请先另存为 .docx。</p>
               <label class="stack-form__label" for="knowledge-title">或手动录入标题</label>
               <input id="knowledge-title" name="knowledge-title" type="text" placeholder="例如 部署说明" />
               <label class="stack-form__label" for="knowledge-content">内容</label>
@@ -72,7 +85,7 @@
                 placeholder="直接粘贴一段知识内容，点击导入即可入库。"
               ></textarea>
               <div class="composer__actions">
-                <span class="hint" id="knowledge-hint">支持多文件批量导入，当前调用 /api/v1/knowledge/ingest。</span>
+                <span class="hint" id="knowledge-hint">支持多文件批量导入，当前调用 /api/v1/knowledge/ingest/upload。</span>
                 <button class="button button--primary" id="knowledge-submit" type="submit">导入知识</button>
               </div>
             </form>
@@ -86,6 +99,16 @@
                 <div class="ingest-progress__fill" id="ingest-fill"></div>
               </div>
               <p class="ingest-progress__meta" id="ingest-meta">等待任务开始。</p>
+            </div>
+
+            <div class="detail-card">
+              <div class="detail-card__title-row">
+                <h3>导入队列</h3>
+                <button class="button button--ghost button--small" id="refresh-ingest-jobs" type="button">刷新队列</button>
+              </div>
+              <div class="mini-list" id="ingest-job-list">
+                <div class="empty-state">暂无排队或运行中的导入任务。</div>
+              </div>
             </div>
           </section>
 
@@ -104,6 +127,6 @@
       </main>
     </div>
 
-    <script src="/static/js/knowledge-page.js" defer></script>
+    <script src="/static/js/knowledge-page.js?v=20260426-kb-scope1" defer></script>
   </body>
 </html>

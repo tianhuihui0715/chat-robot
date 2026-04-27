@@ -1,12 +1,15 @@
 const state = {
   lastIngestedIds: new Set(),
   deletingIds: new Set(),
+  cancellingJobIds: new Set(),
   activeJobId: null,
 };
 
 const STORAGE_KEY = "chat_robot_active_ingest_job_id";
 const knowledgeForm = document.getElementById("knowledge-form");
 const knowledgeFiles = document.getElementById("knowledge-files");
+const knowledgeBaseName = document.getElementById("knowledge-base-name");
+const knowledgeBaseId = document.getElementById("knowledge-base-id");
 const knowledgeTitle = document.getElementById("knowledge-title");
 const knowledgeContent = document.getElementById("knowledge-content");
 const knowledgeSubmit = document.getElementById("knowledge-submit");
@@ -21,6 +24,8 @@ const ingestFill = document.getElementById("ingest-fill");
 const ingestMeta = document.getElementById("ingest-meta");
 const ingestStatusInline = document.getElementById("ingest-status-inline");
 const ingestPercentInline = document.getElementById("ingest-percent-inline");
+const ingestJobList = document.getElementById("ingest-job-list");
+const refreshIngestJobsButton = document.getElementById("refresh-ingest-jobs");
 
 const INGEST_POLL_INTERVAL_QUEUED_MS = 3000;
 const INGEST_POLL_INTERVAL_RUNNING_MS = 5000;
@@ -72,6 +77,7 @@ function formatIngestStage(stage, status) {
     upserting: "写入知识库中",
     completed: "已完成",
     failed: "失败",
+    cancelled: "已取消",
   };
   return labels[stage] || "执行中";
 }
@@ -97,6 +103,122 @@ function updateIngestProgress(data) {
     metaParts.push(`文档：${data.processed_documents ?? 0}/${data.submitted_documents ?? 0}`);
   }
   ingestMeta.textContent = metaParts.join("，") || "等待任务开始。";
+}
+
+function buildJobSummary(data) {
+  const percentValue = calculateIngestPercent(data);
+  const stageLabel = formatIngestStage(data.current_stage, data.status);
+  const title = data.current_title || `任务 ${data.job_id.slice(0, 8)}`;
+  const chunks =
+    typeof data.total_chunks === "number" && data.total_chunks > 0
+      ? `chunks ${data.processed_chunks ?? 0}/${data.total_chunks}`
+      : `文档 ${data.processed_documents ?? 0}/${data.submitted_documents ?? 0}`;
+  return { percentValue, stageLabel, title, chunks };
+}
+
+function renderIngestJobs(jobs) {
+  if (!ingestJobList) {
+    return;
+  }
+  if (!jobs.length) {
+    ingestJobList.innerHTML = '<div class="empty-state">暂无排队或运行中的导入任务。</div>';
+    return;
+  }
+
+  ingestJobList.innerHTML = "";
+  jobs.forEach((job, index) => {
+    const { percentValue, stageLabel, title, chunks } = buildJobSummary(job);
+    const item = document.createElement("article");
+    item.className = "mini-list__item";
+    const row = document.createElement("div");
+    row.className = "mini-list__row";
+
+    const info = document.createElement("div");
+    info.className = "mini-list__meta-group";
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    const meta = document.createElement("span");
+    meta.className = "hint";
+    meta.textContent = `${job.job_id.slice(0, 8)} · ${stageLabel} · ${chunks} · ${percentValue}%`;
+    info.append(heading, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "mini-list__actions";
+    const badge = document.createElement("span");
+    badge.className = `badge ${job.status === "running" ? "badge--success" : "badge--neutral"}`;
+    badge.textContent = job.status === "running" ? "运行中" : `排队 ${index + 1}`;
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "button button--ghost button--small";
+    cancelButton.textContent = state.cancellingJobIds.has(job.job_id) ? "取消中..." : "取消";
+    cancelButton.disabled = state.cancellingJobIds.has(job.job_id);
+    cancelButton.addEventListener("click", async () => {
+      const confirmed = window.confirm(
+        job.status === "running"
+          ? `确定取消正在导入的任务 ${job.job_id.slice(0, 8)} 吗？当前批次结束后才会停止。`
+          : `确定取消排队任务 ${job.job_id.slice(0, 8)} 吗？`,
+      );
+      if (confirmed) {
+        await cancelIngestJob(job.job_id);
+      }
+    });
+
+    actions.append(badge, cancelButton);
+    row.append(info, actions);
+    item.appendChild(row);
+    ingestJobList.appendChild(item);
+  });
+}
+
+async function fetchActiveJobs() {
+  const response = await fetch("/api/v1/knowledge/ingest");
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+async function refreshIngestJobs() {
+  try {
+    const jobs = await fetchActiveJobs();
+    renderIngestJobs(jobs);
+    const runningJob = jobs.find((job) => job.status === "running");
+    const primaryJob = runningJob || jobs[0];
+    if (primaryJob) {
+      updateIngestProgress(primaryJob);
+    }
+    return jobs;
+  } catch (error) {
+    if (ingestJobList) {
+      ingestJobList.innerHTML = `<div class="empty-state">加载导入队列失败：${error.message}</div>`;
+    }
+    return [];
+  }
+}
+
+async function cancelIngestJob(jobId) {
+  state.cancellingJobIds.add(jobId);
+  await refreshIngestJobs();
+  try {
+    const response = await fetch(`/api/v1/knowledge/ingest/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    if (state.activeJobId === jobId) {
+      rememberActiveJob(null);
+    }
+    knowledgeHint.textContent = `导入任务 ${jobId.slice(0, 8)} 已取消。`;
+    updateIngestProgress(data);
+  } catch (error) {
+    knowledgeHint.textContent = `取消任务失败：${error.message}`;
+  } finally {
+    state.cancellingJobIds.delete(jobId);
+    await refreshIngestJobs();
+  }
 }
 
 function readFileAsText(file) {
@@ -131,7 +253,7 @@ function buildDocumentItem(entry) {
 
   const id = document.createElement("span");
   id.className = "hint";
-  id.textContent = entry.document_id;
+  id.textContent = `${entry.document_id} · 知识库：${entry.knowledge_base_name || "默认知识库"} (${entry.knowledge_base_id || "default"})`;
 
   titleWrap.append(title, id);
 
@@ -219,7 +341,9 @@ async function waitForIngestJob(jobId) {
 
   while (true) {
     const data = await fetchJobStatus(jobId);
-    updateIngestProgress(data);
+    const jobs = await refreshIngestJobs();
+    const runningJob = jobs.find((job) => job.status === "running");
+    updateIngestProgress(data.status === "queued" && runningJob ? runningJob : data);
 
     if (data.status === "completed") {
       rememberActiveJob(null);
@@ -229,11 +353,15 @@ async function waitForIngestJob(jobId) {
       rememberActiveJob(null);
       return data;
     }
+    if (data.status === "cancelled") {
+      rememberActiveJob(null);
+      return data;
+    }
 
-    knowledgeHint.textContent = `导入任务 ${jobId.slice(0, 8)} ${formatIngestStage(
-      data.current_stage,
-      data.status,
-    )}`;
+    knowledgeHint.textContent =
+      data.status === "queued" && runningJob
+        ? `导入任务 ${jobId.slice(0, 8)} 正在排队，当前运行 ${runningJob.job_id.slice(0, 8)}。`
+        : `导入任务 ${jobId.slice(0, 8)} ${formatIngestStage(data.current_stage, data.status)}`;
 
     await sleep(
       data.status === "running"
@@ -285,49 +413,31 @@ async function ingestKnowledge(event) {
   knowledgeHint.textContent = "正在整理上传内容并创建导入任务，请稍等...";
 
   try {
-    const documents = [];
     const files = Array.from(knowledgeFiles.files ?? []);
-
-    for (const file of files) {
-      const content = (await readFileAsText(file)).trim();
-      if (!content) {
-        continue;
-      }
-      documents.push({
-        title: file.name,
-        content,
-        metadata: {
-          source: "upload",
-          file_name: file.name,
-        },
-      });
-    }
-
     const manualTitle = knowledgeTitle.value.trim();
     const manualContent = knowledgeContent.value.trim();
-    if (manualContent) {
-      documents.push({
-        title: manualTitle || `manual-${new Date().toISOString()}`,
-        content: manualContent,
-        metadata: {
-          source: "manual",
-        },
-      });
-    }
-
-    if (!documents.length) {
+    const kbName = knowledgeBaseName.value.trim() || "默认知识库";
+    const kbId = normalizeKnowledgeBaseId(knowledgeBaseId.value.trim() || kbName);
+    if (!files.length && !manualContent) {
       throw new Error("请先选择文件或输入知识内容。");
     }
 
-    const totalChars = documents.reduce((sum, entry) => sum + entry.content.length, 0);
-    knowledgeHint.textContent = `正在提交 ${documents.length} 篇内容，累计 ${totalChars} 个字符。`;
+    const payload = new FormData();
+    payload.append("knowledge_base_id", kbId);
+    payload.append("knowledge_base_name", kbName);
+    files.forEach((file) => payload.append("files", file));
+    if (manualTitle) {
+      payload.append("manual_title", manualTitle);
+    }
+    if (manualContent) {
+      payload.append("manual_content", manualContent);
+    }
 
-    const response = await fetch("/api/v1/knowledge/ingest", {
+    knowledgeHint.textContent = `正在提交 ${files.length} 个文件${manualContent.length ? `和 ${manualContent.length} 个手动字符` : ""}，后端将解析格式并创建导入任务。`;
+
+    const response = await fetch("/api/v1/knowledge/ingest/upload", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ documents }),
+      body: payload,
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -365,9 +475,21 @@ async function ingestKnowledge(event) {
   }
 }
 
+function normalizeKnowledgeBaseId(value) {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_\-\u4e00-\u9fff]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "default"
+  );
+}
+
 knowledgeForm.addEventListener("submit", ingestKnowledge);
 refreshDocumentsButton.addEventListener("click", refreshDocuments);
+refreshIngestJobsButton?.addEventListener("click", refreshIngestJobs);
 
 resetIngestProgress();
 refreshDocuments();
+refreshIngestJobs();
 restoreActiveJob();

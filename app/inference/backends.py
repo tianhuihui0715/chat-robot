@@ -188,11 +188,14 @@ class LocalHFGenerationBackend:
         if request.sources:
             source_sections = []
             for index, source in enumerate(request.sources, start=1):
+                citation_index = source.metadata.get("citation_index", str(index))
                 source_sections.append(
-                    f"[{index}] id={source.document_id} title={source.title}\n{source.content}"
+                    f"[{citation_index}] id={source.document_id} title={source.title}\n{source.content}"
                 )
             system_parts.append(
-                "回答时优先参考以下知识片段；如果依据不足，请明确说明。\n\n"
+                "回答时优先参考以下知识片段；如果依据不足，请明确说明。"
+                "凡是依据知识片段生成的事实、结论或列表项，必须在对应句子末尾标注来源编号，格式为【1】、【2】。"
+                "如果同一句同时依据多个来源，可以写成【1】【3】。\n\n"
                 + "\n\n".join(source_sections)
             )
 

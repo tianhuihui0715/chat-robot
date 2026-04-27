@@ -55,4 +55,5 @@ async def get_trace_detail(
         step_limit=step_limit,
         has_more_steps=has_more_steps and not view_all,
         output_truncated=output_truncated and not view_all,
+        snapshot=container.rag_snapshot_service.get_snapshot(request_id),
     )

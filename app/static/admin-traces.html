@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>流程日志</title>
-    <link rel="stylesheet" href="/static/css/app.css?v=20260423-admin4" />
+    <link rel="stylesheet" href="/static/css/app.css?v=20260426-trace-contrast1" />
   </head>
   <body class="app-shell app-shell--admin">
     <div class="background-grid" aria-hidden="true"></div>
@@ -19,8 +19,9 @@
           <a class="admin-nav__link" href="/knowledge">知识库</a>
           <a class="admin-nav__link" href="/admin">系统概览</a>
           <a class="admin-nav__link is-active" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link" href="/admin/performance">性能统计</a>
           <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
-          <a class="admin-nav__link" href="/admin/compare">效果对比</a>
+          <a class="admin-nav__link" href="/admin/compare">RAG 评测</a>
           <a class="admin-nav__link" href="/docs">API 文档</a>
         </nav>
       </aside>
@@ -96,13 +97,23 @@
 
             <div class="timeline" id="trace-timeline"></div>
 
+            <div class="detail-card detail-card--wide">
+              <h3>全链路快照</h3>
+              <div class="snapshot-view" id="trace-snapshot">当前请求暂无内存快照，可能是服务重启前的历史日志。</div>
+            </div>
+
             <div class="detail-split">
               <div class="detail-card">
                 <h3>最终输出</h3>
                 <pre class="code-block" id="trace-output">-</pre>
               </div>
               <div class="detail-card">
-                <h3>原始详情</h3>
+                <div class="detail-card__title-row">
+                  <h3>原始详情</h3>
+                  <button class="button button--ghost button--small" id="trace-raw-toggle" type="button">
+                    查看完整 JSON
+                  </button>
+                </div>
                 <pre class="code-block" id="trace-raw">-</pre>
               </div>
             </div>
@@ -112,6 +123,6 @@
     </div>
 
     <script src="/static/js/admin-common.js?v=20260423-admin4" defer></script>
-    <script src="/static/js/admin-traces.js?v=20260423-admin4" defer></script>
+    <script src="/static/js/admin-traces.js?v=20260426-trace-contrast1" defer></script>
   </body>
 </html>

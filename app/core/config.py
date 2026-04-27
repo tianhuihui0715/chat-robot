@@ -42,7 +42,14 @@ ENV_MAPPING = {
     "GPU_QUEUE_MAXSIZE": "gpu_queue_maxsize",
     "RAG_TOP_K": "rag_top_k",
     "RAG_SCORE_THRESHOLD": "rag_score_threshold",
+    "RAG_RERANK_CANDIDATE_LIMIT": "rag_rerank_candidate_limit",
     "RAG_COLLECTION_NAME": "rag_collection_name",
+    "RAG_RETRIEVAL_MODE": "rag_retrieval_mode",
+    "RAG_BM25_TOP_K": "rag_bm25_top_k",
+    "RAG_BM25_TITLE_BOOST": "rag_bm25_title_boost",
+    "RAG_RRF_K": "rag_rrf_k",
+    "RAG_RRF_MIN_SCORE": "rag_rrf_min_score",
+    "RAG_LEXICAL_INDEX_PATH": "rag_lexical_index_path",
     "RAG_CHUNK_SIZE": "rag_chunk_size",
     "RAG_CHUNK_OVERLAP": "rag_chunk_overlap",
     "POSTGRES_HOST": "postgres_host",
@@ -89,7 +96,14 @@ class Settings(BaseModel):
 
     rag_top_k: int = 4
     rag_score_threshold: float = 0.1
+    rag_rerank_candidate_limit: int = 12
     rag_collection_name: str = "knowledge_chunks"
+    rag_retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
+    rag_bm25_top_k: int = 8
+    rag_bm25_title_boost: float = 2.0
+    rag_rrf_k: int = 60
+    rag_rrf_min_score: float = 0.016
+    rag_lexical_index_path: str = "./data/rag_lexical.db"
     rag_chunk_size: int = 500
     rag_chunk_overlap: int = 80
 
@@ -200,7 +214,13 @@ def _load_config_defaults() -> dict[str, Any]:
                 {
                     "rag_top_k": data.get("rag", {}).get("top_k"),
                     "rag_score_threshold": data.get("rag", {}).get("score_threshold"),
+                    "rag_rerank_candidate_limit": data.get("rag", {}).get("rerank_candidate_limit"),
                     "rag_collection_name": data.get("rag", {}).get("collection_name"),
+                    "rag_retrieval_mode": data.get("rag", {}).get("retrieval_mode"),
+                    "rag_bm25_top_k": data.get("rag", {}).get("bm25_top_k"),
+                    "rag_bm25_title_boost": data.get("rag", {}).get("bm25_title_boost"),
+                    "rag_rrf_k": data.get("rag", {}).get("rrf_k"),
+                    "rag_rrf_min_score": data.get("rag", {}).get("rrf_min_score"),
                     "rag_chunk_size": data.get("rag", {}).get("chunk_size"),
                     "rag_chunk_overlap": data.get("rag", {}).get("chunk_overlap"),
                 }

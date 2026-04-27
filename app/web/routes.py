@@ -42,3 +42,8 @@ async def admin_rag_page() -> FileResponse:
 @router.get("/admin/compare", include_in_schema=False)
 async def admin_compare_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "admin-compare.html")
+
+
+@router.get("/admin/performance", include_in_schema=False)
+async def admin_performance_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "admin-performance.html")

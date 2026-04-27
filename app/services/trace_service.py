@@ -309,6 +309,21 @@ class TraceService:
             outputs={"output": llm_output},
         )
 
+    def record_timing_step(
+        self,
+        active_trace: ActiveTrace,
+        step_type: str,
+        latency_ms: int | None,
+    ) -> None:
+        if latency_ms is None:
+            return
+        self._store.create_completed_step(
+            request_id=active_trace.request_id,
+            step_type=step_type,
+            step_order=active_trace.next_step_order(),
+            latency_ms=max(0, int(latency_ms)),
+        )
+
     def complete_request_trace(
         self,
         active_trace: ActiveTrace,

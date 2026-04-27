@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RAG 实验台</title>
-    <link rel="stylesheet" href="/static/css/app.css?v=20260423-admin8" />
+    <link rel="stylesheet" href="/static/css/app.css?v=20260425-governance1" />
   </head>
   <body class="app-shell app-shell--admin">
     <div class="background-grid" aria-hidden="true"></div>
@@ -19,6 +19,7 @@
           <a class="admin-nav__link" href="/knowledge">知识库</a>
           <a class="admin-nav__link" href="/admin">系统概览</a>
           <a class="admin-nav__link" href="/admin/traces">流程日志</a>
+          <a class="admin-nav__link" href="/admin/performance">性能统计</a>
           <a class="admin-nav__link" href="/admin/rag">RAG 配置</a>
           <a class="admin-nav__link is-active" href="/admin/compare">RAG 评测</a>
           <a class="admin-nav__link" href="/docs">API 文档</a>
@@ -30,7 +31,7 @@
           <div>
             <p class="eyebrow">RAG Lab</p>
             <h1>RAG 实验台</h1>
-            <p class="lede">上传多格式文件，输入问题集，然后比较不同 chunk、重复率、召回、重排和温度参数下的表现。实验结果只保存在内存里，不会写入正式知识库。</p>
+            <p class="lede">上传多格式文件，输入问题集，然后比较不同 chunk、检索模式、召回、BM25、重排和温度参数下的表现。实验结果只保存在内存里，不会写入正式知识库。</p>
           </div>
         </section>
 
@@ -51,7 +52,11 @@
               <h3>参数含义</h3>
               <p class="hint"><strong>Chunk Size</strong>：切片长度。</p>
               <p class="hint"><strong>Overlap Ratio</strong>：相邻 chunk 的重复比例，`0.2` 表示 20%。</p>
-              <p class="hint"><strong>Retrieval K</strong>：向量召回保留多少候选。</p>
+              <p class="hint"><strong>Retrieval K</strong>：Dense 侧召回多少候选，同时也是未重排时的默认返回上限。</p>
+              <p class="hint"><strong>Retrieval Mode</strong>：`dense` 只走向量，`bm25` 只走关键词，`hybrid` 用 RRF 融合两路结果。</p>
+              <p class="hint"><strong>BM25 Top K</strong>：关键词召回候选数；主要在 `bm25/hybrid` 下生效。</p>
+              <p class="hint"><strong>BM25 Title Boost</strong>：标题命中时的额外权重。</p>
+              <p class="hint"><strong>RRF K</strong>：Hybrid 融合时的排名融合参数。</p>
               <p class="hint"><strong>Rerank K</strong>：重排后最终保留多少条，`0` 表示关闭重排。</p>
               <p class="hint"><strong>Temperature</strong>：生成温度，越高越发散。</p>
             </article>
@@ -129,6 +134,7 @@
               <h2>结果视图</h2>
             </div>
           </div>
+          <div class="metrics-grid" id="rag-lab-summary-results"></div>
           <div class="tabbar" id="rag-lab-view-switch">
             <button class="tabbar__button is-active" data-view="variant" type="button">按方案查看</button>
             <button class="tabbar__button" data-view="question" type="button">按问题对比</button>
@@ -154,13 +160,24 @@
           <label class="stack-form__label">Chunk Size<input class="variant-chunk-size" type="number" min="100" max="4000" /></label>
           <label class="stack-form__label">Overlap Ratio<input class="variant-overlap-ratio" type="number" min="0" max="0.8" step="0.05" /></label>
           <label class="stack-form__label">Retrieval K<input class="variant-retrieval-k" type="number" min="1" max="20" /></label>
+          <label class="stack-form__label">
+            Retrieval Mode
+            <select class="variant-retrieval-mode">
+              <option value="dense">Dense Only</option>
+              <option value="bm25">BM25 Only</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+          </label>
+          <label class="stack-form__label">BM25 Top K<input class="variant-bm25-top-k" type="number" min="1" max="50" /></label>
+          <label class="stack-form__label">BM25 Title Boost<input class="variant-bm25-title-boost" type="number" min="0.1" max="10" step="0.1" /></label>
+          <label class="stack-form__label">RRF K<input class="variant-rrf-k" type="number" min="1" max="200" /></label>
           <label class="stack-form__label">Rerank K<input class="variant-rerank-k" type="number" min="0" max="20" /></label>
           <label class="stack-form__label">Temperature<input class="variant-temperature" type="number" min="0" max="2" step="0.1" /></label>
         </div>
       </article>
     </template>
 
-    <script src="/static/js/admin-common.js?v=20260423-admin8" defer></script>
-    <script src="/static/js/admin-compare.js?v=20260423-admin8" defer></script>
+    <script src="/static/js/admin-common.js?v=20260425-governance1" defer></script>
+    <script src="/static/js/admin-compare.js?v=20260425-governance1" defer></script>
   </body>
 </html>

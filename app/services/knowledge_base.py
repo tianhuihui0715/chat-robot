@@ -7,6 +7,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from qdrant_client import QdrantClient, models
 
 from app.schemas.knowledge import KnowledgeDocument
+from app.services.bm25_index_store import BM25ChunkRecord, SQLiteBM25IndexStore
 from app.services.embedding_service import SentenceTransformerProvider
 
 
@@ -37,6 +38,26 @@ class KnowledgeBase(Protocol):
         ...
 
 
+def normalize_knowledge_base_id(value: str | None) -> str:
+    normalized = (value or "").strip()
+    return normalized or "default"
+
+
+def normalize_knowledge_base_name(value: str | None) -> str:
+    normalized = (value or "").strip()
+    return normalized or "默认知识库"
+
+
+def document_metadata(document: KnowledgeDocument) -> dict[str, str]:
+    knowledge_base_id = normalize_knowledge_base_id(document.knowledge_base_id)
+    knowledge_base_name = normalize_knowledge_base_name(document.knowledge_base_name)
+    return {
+        **{key: str(value) for key, value in document.metadata.items()},
+        "knowledge_base_id": knowledge_base_id,
+        "knowledge_base_name": knowledge_base_name,
+    }
+
+
 class InMemoryKnowledgeBase:
     def __init__(self) -> None:
         self._documents: dict[str, KnowledgeRecord] = {}
@@ -64,7 +85,7 @@ class InMemoryKnowledgeBase:
                 document_id=document_id,
                 title=document.title,
                 content=document.content,
-                metadata=document.metadata,
+                metadata=document_metadata(document),
             )
             document_ids.append(document_id)
             processed_documents += 1
@@ -94,12 +115,14 @@ class QdrantKnowledgeBase:
         collection_name: str,
         chunk_size: int = 500,
         chunk_overlap: int = 80,
+        bm25_index_store: SQLiteBM25IndexStore | None = None,
     ) -> None:
         self._qdrant_client = qdrant_client
         self._embedder_provider = embedder_provider
         self._collection_name = collection_name
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
+        self._bm25_index_store = bm25_index_store
         self._collection_ready = False
         from threading import Lock
 
@@ -151,6 +174,9 @@ class QdrantKnowledgeBase:
                     )
                 document_id = uuid4().hex
                 document_ids.append(document_id)
+                metadata = document_metadata(document)
+                knowledge_base_id = metadata["knowledge_base_id"]
+                knowledge_base_name = metadata["knowledge_base_name"]
 
                 vectors: list[list[float]] = []
                 for batch_start in range(0, len(chunks), self._embedding_batch_size):
@@ -174,6 +200,7 @@ class QdrantKnowledgeBase:
                         )
 
                 points: list[models.PointStruct] = []
+                lexical_chunks: list[BM25ChunkRecord] = []
                 if progress_callback is not None:
                     progress_callback(
                         current_stage="upserting",
@@ -188,9 +215,11 @@ class QdrantKnowledgeBase:
                     payload = {
                         "document_id": document_id,
                         "chunk_id": chunk_id,
+                        "knowledge_base_id": knowledge_base_id,
+                        "knowledge_base_name": knowledge_base_name,
                         "title": document.title,
                         "content": chunk,
-                        "metadata": {key: str(value) for key, value in document.metadata.items()},
+                        "metadata": metadata,
                     }
                     points.append(
                         models.PointStruct(
@@ -199,12 +228,40 @@ class QdrantKnowledgeBase:
                             payload=payload,
                         )
                     )
+                    lexical_chunks.append(
+                        BM25ChunkRecord(
+                            chunk_id=chunk_id,
+                            document_id=document_id,
+                            title=document.title,
+                            content=chunk,
+                            metadata=metadata,
+                        )
+                    )
 
                 self._qdrant_client.upsert(
                     collection_name=self._collection_name,
                     points=points,
                     wait=True,
                 )
+                if self._bm25_index_store is not None:
+                    try:
+                        self._bm25_index_store.upsert_chunks(lexical_chunks)
+                    except Exception:
+                        self._qdrant_client.delete(
+                            collection_name=self._collection_name,
+                            points_selector=models.FilterSelector(
+                                filter=models.Filter(
+                                    must=[
+                                        models.FieldCondition(
+                                            key="document_id",
+                                            match=models.MatchValue(value=document_id),
+                                        )
+                                    ]
+                                )
+                            ),
+                            wait=True,
+                        )
+                        raise
                 processed_documents += 1
                 if progress_callback is not None:
                     progress_callback(
@@ -240,8 +297,12 @@ class QdrantKnowledgeBase:
                     title=str(payload.get("title", "")),
                     content=str(payload.get("content", "")),
                     metadata={
+                        "knowledge_base_id": str(payload.get("knowledge_base_id") or "default"),
+                        "knowledge_base_name": str(payload.get("knowledge_base_name") or "默认知识库"),
+                        **{
                         key: str(value)
                         for key, value in (payload.get("metadata") or {}).items()
+                        },
                     },
                 )
             if offset is None:
@@ -251,6 +312,8 @@ class QdrantKnowledgeBase:
 
     def delete_document(self, document_id: str) -> bool:
         if not self._collection_exists():
+            if self._bm25_index_store is not None:
+                return self._bm25_index_store.delete_document(document_id)
             return False
 
         matches = self._qdrant_client.count(
@@ -266,6 +329,8 @@ class QdrantKnowledgeBase:
             exact=True,
         )
         if matches.count <= 0:
+            if self._bm25_index_store is not None:
+                return self._bm25_index_store.delete_document(document_id)
             return False
 
         self._qdrant_client.delete(
@@ -282,6 +347,8 @@ class QdrantKnowledgeBase:
             ),
             wait=True,
         )
+        if self._bm25_index_store is not None:
+            self._bm25_index_store.delete_document(document_id)
         return True
 
     def _get_embedder(self):
@@ -340,3 +407,44 @@ class QdrantKnowledgeBase:
     def update_chunking(self, *, chunk_size: int, chunk_overlap: int) -> None:
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
+
+    def sync_lexical_index(self) -> int:
+        if self._bm25_index_store is None or not self._collection_exists():
+            return 0
+
+        records: list[BM25ChunkRecord] = []
+        offset = None
+        while True:
+            points, offset = self._qdrant_client.scroll(
+                collection_name=self._collection_name,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in points:
+                payload = point.payload or {}
+                chunk_id = str(payload.get("chunk_id", ""))
+                if not chunk_id:
+                    continue
+                records.append(
+                    BM25ChunkRecord(
+                        chunk_id=chunk_id,
+                        document_id=str(payload.get("document_id", "")),
+                        title=str(payload.get("title", "")),
+                        content=str(payload.get("content", "")),
+                        metadata={
+                            "knowledge_base_id": str(payload.get("knowledge_base_id") or "default"),
+                            "knowledge_base_name": str(payload.get("knowledge_base_name") or "默认知识库"),
+                            **{
+                            key: str(value)
+                            for key, value in (payload.get("metadata") or {}).items()
+                            },
+                        },
+                    )
+                )
+            if offset is None:
+                break
+
+        self._bm25_index_store.upsert_chunks(records)
+        return len(records)

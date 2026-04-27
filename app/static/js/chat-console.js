@@ -27,6 +27,7 @@ const sessionIdInput = document.getElementById("session-id");
 const newSessionButton = document.getElementById("new-session");
 const sessionHint = document.getElementById("session-hint");
 const streamMode = document.getElementById("stream-mode");
+const rerankMode = document.getElementById("rerank-mode");
 const chatHint = document.getElementById("chat-hint");
 
 function appendBubble(role, text) {
@@ -64,9 +65,19 @@ function setSessionHint() {
 }
 
 function updateChatHint() {
-  chatHint.textContent = streamMode.checked
+  const endpointText = streamMode.checked
     ? "当前模式：流式返回 /api/v1/chat/stream"
     : "当前模式：普通返回 /api/v1/chat";
+  const rerankText = rerankMode.checked ? "启用重排，答案更稳但更慢" : "跳过重排，响应更快";
+  chatHint.textContent = `${endpointText}；${rerankText}`;
+}
+
+function buildChatPayload() {
+  return {
+    session_id: state.sessionId,
+    messages: state.messages,
+    use_reranker: rerankMode.checked,
+  };
 }
 
 function resetConversation() {
@@ -114,10 +125,26 @@ function renderSourcePage() {
   for (const source of visibleItems) {
     const item = document.createElement("article");
     item.className = "mini-list__item";
+    const mode = source.metadata?.retrieval_mode;
+    const fusion = source.metadata?.fusion_sources;
+    const chunkId = source.metadata?.chunk_id;
+    const chunkIds = source.metadata?.chunk_ids;
+    const citationIndex = source.metadata?.citation_index;
+    const mergedCount = Number(source.metadata?.merged_chunk_count ?? 1);
     item.innerHTML = `
       <div class="mini-list__row">
         <strong>${source.title || source.document_id}</strong>
-        <span class="badge badge--neutral">${Number(source.score ?? 0).toFixed(3)}</span>
+        <div class="mini-list__actions">
+          ${citationIndex ? `<span class="badge badge--success">来源 ${citationIndex}</span>` : ""}
+          <span class="badge badge--neutral">${Number(source.score ?? 0).toFixed(3)}</span>
+        </div>
+      </div>
+      <div class="console-tags">
+        ${mode ? `<span class="console-tag">${mode}</span>` : ""}
+        ${fusion ? `<span class="console-tag">融合 ${fusion}</span>` : ""}
+        ${mergedCount > 1 ? `<span class="console-tag">合并 ${mergedCount} 段</span>` : ""}
+        ${chunkId ? `<span class="console-tag">${chunkId}</span>` : ""}
+        ${chunkIds && chunkIds !== chunkId ? `<span class="console-tag">${chunkIds}</span>` : ""}
       </div>
       <p>${source.content || ""}</p>
     `;
@@ -182,10 +209,7 @@ async function sendMessageNonStream(assistantBubble) {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      session_id: state.sessionId,
-      messages: state.messages,
-    }),
+    body: JSON.stringify(buildChatPayload()),
   });
 
   if (!response.ok) {
@@ -203,10 +227,7 @@ async function sendMessageStream(assistantBubble) {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      session_id: state.sessionId,
-      messages: state.messages,
-    }),
+    body: JSON.stringify(buildChatPayload()),
   });
 
   if (!response.ok) {
@@ -316,6 +337,7 @@ newSessionButton.addEventListener("click", () => {
   resetConversation();
 });
 streamMode.addEventListener("change", updateChatHint);
+rerankMode.addEventListener("change", updateChatHint);
 
 setSessionHint();
 updateChatHint();

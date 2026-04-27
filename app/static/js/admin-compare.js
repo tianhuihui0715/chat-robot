@@ -13,6 +13,7 @@
   const exportExcelButton = document.getElementById("rag-lab-export-excel");
   const exportWordButton = document.getElementById("rag-lab-export-word");
   const resultsPanel = document.getElementById("rag-lab-results-panel");
+  const summaryResults = document.getElementById("rag-lab-summary-results");
   const variantResults = document.getElementById("rag-lab-variant-results");
   const questionResults = document.getElementById("rag-lab-question-results");
   const viewButtons = Array.from(document.querySelectorAll("[data-view]"));
@@ -33,6 +34,10 @@
       chunk_size: 1200,
       chunk_overlap_ratio: 0.1,
       retrieval_k: 6,
+      retrieval_mode: "hybrid",
+      bm25_top_k: 8,
+      bm25_title_boost: 2.0,
+      rrf_k: 60,
       rerank_k: 4,
       temperature: 0.0,
     },
@@ -41,6 +46,10 @@
       chunk_size: 800,
       chunk_overlap_ratio: 0.2,
       retrieval_k: 8,
+      retrieval_mode: "dense",
+      bm25_top_k: 8,
+      bm25_title_boost: 2.0,
+      rrf_k: 60,
       rerank_k: 4,
       temperature: 0.4,
     },
@@ -49,6 +58,10 @@
       chunk_size: 400,
       chunk_overlap_ratio: 0.25,
       retrieval_k: 10,
+      retrieval_mode: "bm25",
+      bm25_top_k: 12,
+      bm25_title_boost: 2.4,
+      rrf_k: 60,
       rerank_k: 0,
       temperature: 0.2,
     },
@@ -57,6 +70,10 @@
       chunk_size: 1600,
       chunk_overlap_ratio: 0.08,
       retrieval_k: 5,
+      retrieval_mode: "hybrid",
+      bm25_top_k: 10,
+      bm25_title_boost: 3.0,
+      rrf_k: 80,
       rerank_k: 3,
       temperature: 0.0,
     },
@@ -140,6 +157,10 @@
     const chunkInput = card.querySelector(".variant-chunk-size");
     const overlapInput = card.querySelector(".variant-overlap-ratio");
     const retrievalInput = card.querySelector(".variant-retrieval-k");
+    const retrievalModeInput = card.querySelector(".variant-retrieval-mode");
+    const bm25TopKInput = card.querySelector(".variant-bm25-top-k");
+    const bm25TitleBoostInput = card.querySelector(".variant-bm25-title-boost");
+    const rrfKInput = card.querySelector(".variant-rrf-k");
     const rerankInput = card.querySelector(".variant-rerank-k");
     const temperatureInput = card.querySelector(".variant-temperature");
 
@@ -148,6 +169,10 @@
     chunkInput.value = defaults.chunk_size;
     overlapInput.value = defaults.chunk_overlap_ratio;
     retrievalInput.value = defaults.retrieval_k;
+    retrievalModeInput.value = defaults.retrieval_mode ?? "hybrid";
+    bm25TopKInput.value = defaults.bm25_top_k ?? 8;
+    bm25TitleBoostInput.value = defaults.bm25_title_boost ?? 2.0;
+    rrfKInput.value = defaults.rrf_k ?? 60;
     rerankInput.value = defaults.rerank_k;
     temperatureInput.value = defaults.temperature;
 
@@ -178,9 +203,10 @@
     const variants = state.variants.map((card, index) => {
       const name = card.querySelector(".variant-name").value.trim() || `方案 ${index + 1}`;
       const retrievalK = Number(card.querySelector(".variant-retrieval-k").value);
+      const bm25TopK = Number(card.querySelector(".variant-bm25-top-k").value);
       const rerankK = Number(card.querySelector(".variant-rerank-k").value);
-      if (rerankK > retrievalK) {
-        throw new Error(`${name} 的重排数量不能大于召回数量。`);
+      if (rerankK > Math.max(retrievalK, bm25TopK)) {
+        throw new Error(`${name} 的重排数量不能大于可用候选数量。`);
       }
       return {
         variant_id: card.dataset.variantId,
@@ -188,6 +214,10 @@
         chunk_size: Number(card.querySelector(".variant-chunk-size").value),
         chunk_overlap_ratio: Number(card.querySelector(".variant-overlap-ratio").value),
         retrieval_k: retrievalK,
+        retrieval_mode: card.querySelector(".variant-retrieval-mode").value,
+        bm25_top_k: bm25TopK,
+        bm25_title_boost: Number(card.querySelector(".variant-bm25-title-boost").value),
+        rrf_k: Number(card.querySelector(".variant-rrf-k").value),
         rerank_k: rerankK,
         temperature: Number(card.querySelector(".variant-temperature").value),
       };
@@ -239,6 +269,97 @@
     return button;
   }
 
+  function roundMetric(value, digits = 2) {
+    if (!Number.isFinite(value)) {
+      return "0";
+    }
+    return Number(value).toFixed(digits);
+  }
+
+  function computeVariantMetrics(variant) {
+    const questionCount = variant.questions.length || 1;
+    const totalSources = variant.questions.reduce((sum, question) => sum + (question.sources?.length || 0), 0);
+    const topScores = variant.questions
+      .map((question) => question.sources?.[0]?.score)
+      .filter((score) => Number.isFinite(score));
+    const answerLengths = variant.questions.map((question) => (question.answer_full || question.answer_preview || "").length);
+
+    return {
+      totalSources,
+      avgSources: totalSources / questionCount,
+      avgTopScore: topScores.length ? topScores.reduce((sum, score) => sum + score, 0) / topScores.length : 0,
+      avgAnswerLength: answerLengths.length
+        ? answerLengths.reduce((sum, length) => sum + length, 0) / answerLengths.length
+        : 0,
+      hitQuestions: variant.questions.filter((question) => (question.sources?.length || 0) > 0).length,
+    };
+  }
+
+  function renderSummary(session) {
+    summaryResults.innerHTML = "";
+    const metricsByVariant = session.variants.map((variant) => ({
+      variant,
+      metrics: computeVariantMetrics(variant),
+    }));
+
+    const maxAvgSources = Math.max(...metricsByVariant.map((item) => item.metrics.avgSources), 0);
+    const maxAvgTopScore = Math.max(...metricsByVariant.map((item) => item.metrics.avgTopScore), 0);
+    const maxHitQuestions = Math.max(...metricsByVariant.map((item) => item.metrics.hitQuestions), 0);
+
+    metricsByVariant.forEach(({ variant, metrics }) => {
+      const card = document.createElement("article");
+      card.className = "metric-card";
+
+      const header = document.createElement("div");
+      header.className = "detail-card__title-row";
+      const title = document.createElement("div");
+      const eyebrow = document.createElement("p");
+      eyebrow.className = "panel__eyebrow";
+      eyebrow.textContent = "Summary";
+      const name = document.createElement("h3");
+      name.textContent = variant.name;
+      title.append(eyebrow, name);
+
+      const badges = document.createElement("div");
+      badges.className = "mini-list__actions";
+      badges.append(createBadge(variant.retrieval_mode));
+      if (metrics.avgSources === maxAvgSources && maxAvgSources > 0) {
+        badges.append(createBadge("来源最多", "success"));
+      }
+      if (metrics.avgTopScore === maxAvgTopScore && maxAvgTopScore > 0) {
+        badges.append(createBadge("首条分最高", "success"));
+      }
+      if (metrics.hitQuestions === maxHitQuestions && maxHitQuestions > 0) {
+        badges.append(createBadge("命中题数最多", "success"));
+      }
+      header.append(title, badges);
+
+      const list = document.createElement("div");
+      list.className = "metric-list";
+      [
+        ["题目命中", `${metrics.hitQuestions} / ${session.question_count}`],
+        ["总来源数", `${metrics.totalSources}`],
+        ["平均来源数", roundMetric(metrics.avgSources, 1)],
+        ["平均首条分", roundMetric(metrics.avgTopScore, 3)],
+        ["平均回答长度", `${Math.round(metrics.avgAnswerLength)} 字`],
+        ["参数", `chunk ${variant.chunk_size} / overlap ${variant.chunk_overlap_ratio} / dense ${variant.retrieval_k} / bm25 ${variant.bm25_top_k}`],
+      ].forEach(([label, value]) => {
+        const row = document.createElement("div");
+        row.className = "metric-row";
+        const labelElement = document.createElement("span");
+        labelElement.className = "metric-row__label";
+        labelElement.textContent = label;
+        const valueElement = document.createElement("strong");
+        valueElement.textContent = value;
+        row.append(labelElement, valueElement);
+        list.appendChild(row);
+      });
+
+      card.append(header, list, createApplyButton(session.session_id, variant.variant_id, variant.name));
+      summaryResults.appendChild(card);
+    });
+  }
+
   function createQuestionCard(questionResult) {
     const item = document.createElement("article");
     item.className = "mini-list__item";
@@ -258,7 +379,7 @@
         const name = document.createElement("strong");
         name.textContent = source.title;
         row.append(name, createBadge(`score ${Number(source.score).toFixed(3)}`));
-        sourceItem.append(row, createHint(shorten(source.preview, 120)));
+        sourceItem.append(row, createHint(shorten(source.preview, 120)), createSourceMeta(source));
         sourceList.appendChild(sourceItem);
       });
       item.append(sourceList);
@@ -291,6 +412,10 @@
         createBadge(`chunk ${variant.chunk_size}`),
         createBadge(`overlap ${variant.chunk_overlap_ratio}`),
         createBadge(`召回 ${variant.retrieval_k}`),
+        createBadge(variant.retrieval_mode),
+        createBadge(`BM25 ${variant.bm25_top_k}`),
+        createBadge(`标题权重 ${variant.bm25_title_boost}`),
+        createBadge(`RRF ${variant.rrf_k}`),
         createBadge(variant.rerank_k > 0 ? `重排 ${variant.rerank_k}` : "不重排"),
         createBadge(`temp ${variant.temperature}`),
         createApplyButton(session.session_id, variant.variant_id, variant.name),
@@ -313,6 +438,16 @@
     questionResults.innerHTML = "";
     const questions = session.variants[0]?.questions?.map((item) => item.question) || [];
     questions.forEach((question, questionIndex) => {
+      const variantSlice = session.variants.map((variant) => ({
+        variant,
+        result: variant.questions[questionIndex],
+      }));
+      const maxSourceCount = Math.max(...variantSlice.map((item) => item.result?.sources?.length || 0), 0);
+      const maxTopScore = Math.max(
+        ...variantSlice.map((item) => item.result?.sources?.[0]?.score ?? 0),
+        0,
+      );
+
       const panel = document.createElement("article");
       panel.className = "mini-list__item";
 
@@ -322,30 +457,38 @@
 
       const split = document.createElement("div");
       split.className = "detail-split";
-      session.variants.forEach((variant) => {
-        const result = variant.questions[questionIndex];
+      variantSlice.forEach(({ variant, result }) => {
         const card = document.createElement("section");
         card.className = "detail-card";
+        const sourceCount = result?.sources?.length || 0;
+        const topScore = result?.sources?.[0]?.score ?? 0;
+        if ((sourceCount > 0 && sourceCount === maxSourceCount) || (topScore > 0 && topScore === maxTopScore)) {
+          card.classList.add("detail-card--highlight");
+        }
 
         const row = document.createElement("div");
         row.className = "detail-card__title-row";
         const name = document.createElement("h3");
         name.textContent = variant.name;
-        row.append(
-          name,
-          createBadge(
-            result?.sources?.length ? `${result.sources.length} 条来源` : "无来源",
-          ),
-        );
+        const meta = document.createElement("div");
+        meta.className = "mini-list__actions";
+        meta.append(createBadge(sourceCount ? `${sourceCount} 条来源` : "无来源"));
+        if (sourceCount > 0 && sourceCount === maxSourceCount) {
+          meta.append(createBadge("来源最多", "success"));
+        }
+        if (topScore > 0 && topScore === maxTopScore) {
+          meta.append(createBadge("首条分最高", "success"));
+        }
+        row.append(name, meta);
 
         card.append(
           row,
-          createHint(`参数：chunk ${variant.chunk_size} / overlap ${variant.chunk_overlap_ratio} / 召回 ${variant.retrieval_k} / 重排 ${variant.rerank_k} / temp ${variant.temperature}`),
+          createHint(`参数：chunk ${variant.chunk_size} / overlap ${variant.chunk_overlap_ratio} / mode ${variant.retrieval_mode} / dense ${variant.retrieval_k} / bm25 ${variant.bm25_top_k} / boost ${variant.bm25_title_boost} / rrf ${variant.rrf_k} / 重排 ${variant.rerank_k} / temp ${variant.temperature}`),
           createHint(`回答摘要：${result?.answer_preview || "[空]"}`),
         );
 
         if (result?.sources?.length) {
-          card.append(createHint(`首条来源：${result.sources[0].title}`));
+          card.append(createHint(`首条来源：${result.sources[0].title}`), createSourceMeta(result.sources[0]));
         }
         card.append(createApplyButton(session.session_id, variant.variant_id, variant.name));
         split.appendChild(card);
@@ -360,8 +503,46 @@
     actionsPanel.hidden = false;
     resultsPanel.hidden = false;
     sessionMeta.textContent = `会话 ${session.session_id.slice(0, 8)}，${session.document_count} 个文件，${session.question_count} 个问题。全量结果可下载为 Excel 或 Word。`;
+    renderSummary(session);
     renderByVariant(session);
     renderByQuestion(session);
+  }
+
+  function createSourceMeta(source) {
+    const meta = document.createElement("div");
+    meta.className = "console-tags";
+    const mode = source.retrieval_mode || source?.metadata?.retrieval_mode;
+    const fusion = source.fusion_sources || source?.metadata?.fusion_sources;
+    const chunkId = source.chunk_id || source?.metadata?.chunk_id;
+    const chunkIds = source.chunk_ids || source?.metadata?.chunk_ids;
+    const citationIndex = source.citation_index || source?.metadata?.citation_index;
+    const mergedCount = Number(source.merged_chunk_count || source?.metadata?.merged_chunk_count || 1);
+    if (citationIndex) {
+      meta.appendChild(createConsoleTag(`来源 ${citationIndex}`));
+    }
+    if (mode) {
+      meta.appendChild(createConsoleTag(mode));
+    }
+    if (fusion) {
+      meta.appendChild(createConsoleTag(`融合 ${fusion}`));
+    }
+    if (mergedCount > 1) {
+      meta.appendChild(createConsoleTag(`合并 ${mergedCount} 段`));
+    }
+    if (chunkId) {
+      meta.appendChild(createConsoleTag(chunkId));
+    }
+    if (chunkIds && chunkIds !== chunkId) {
+      meta.appendChild(createConsoleTag(chunkIds));
+    }
+    return meta;
+  }
+
+  function createConsoleTag(text) {
+    const tag = document.createElement("span");
+    tag.className = "console-tag";
+    tag.textContent = text;
+    return tag;
   }
 
   viewButtons.forEach((button) => {
@@ -396,6 +577,7 @@
       setStatus("运行中", "success");
       actionsPanel.hidden = true;
       resultsPanel.hidden = false;
+      summaryResults.innerHTML = "";
       variantResults.innerHTML = "";
       questionResults.innerHTML = '<div class="empty-state">实验运行中，问题对比结果将在完成后展示。</div>';
       variantResults.innerHTML = `
@@ -437,6 +619,7 @@
     } catch (error) {
       actionsPanel.hidden = true;
       resultsPanel.hidden = false;
+      summaryResults.innerHTML = "";
       variantResults.innerHTML = "";
       questionResults.innerHTML = "";
       hint.textContent = `实验失败：${error.message}`;

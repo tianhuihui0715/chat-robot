@@ -13,6 +13,10 @@ from app.services.knowledge_base import KnowledgeBase
 logger = logging.getLogger(__name__)
 
 
+class KnowledgeIngestCancelled(RuntimeError):
+    """Raised inside the ingest worker when a user cancels a running job."""
+
+
 class KnowledgeIngestService:
     def __init__(self, knowledge_base: KnowledgeBase, store: KnowledgeIngestStore) -> None:
         self._knowledge_base = knowledge_base
@@ -56,6 +60,14 @@ class KnowledgeIngestService:
             return None
         return self._to_status(job)
 
+    def list_active_jobs(self) -> list[KnowledgeIngestStatusResponse]:
+        return [self._to_status(job) for job in self._store.list_active_jobs()]
+
+    async def cancel_job(self, job_id: str) -> KnowledgeIngestStatusResponse:
+        job = await asyncio.to_thread(self._store.mark_job_cancelled, job_id)
+        self._queued_job_ids.discard(job_id)
+        return self._to_status(job)
+
     async def delete_document(self, document_id: str) -> bool:
         return await asyncio.to_thread(self._store.delete_document, document_id)
 
@@ -90,6 +102,10 @@ class KnowledgeIngestService:
             self._queued_job_ids.discard(job_id)
             logger.info("Knowledge ingest job %s dequeued.", job_id)
             try:
+                existing_job = await asyncio.to_thread(self._store.get_job, job_id)
+                if existing_job is None or existing_job.status == "cancelled":
+                    logger.info("Knowledge ingest job %s skipped because it was cancelled.", job_id)
+                    continue
                 await asyncio.to_thread(self._store.mark_job_running, job_id)
                 documents = await asyncio.to_thread(self._store.load_documents, job_id)
                 logger.info("Knowledge ingest job %s started with %s documents.", job_id, len(documents))
@@ -111,6 +127,9 @@ class KnowledgeIngestService:
                     job_id,
                     len(document_ids),
                 )
+            except KnowledgeIngestCancelled:
+                await asyncio.to_thread(self._store.mark_job_cancelled, job_id)
+                logger.info("Knowledge ingest job %s cancelled.", job_id)
             except Exception as exc:
                 await asyncio.to_thread(self._store.mark_job_failed, job_id, str(exc))
                 logger.exception("Knowledge ingest job %s failed.", job_id)
@@ -119,6 +138,9 @@ class KnowledgeIngestService:
 
     def _build_progress_callback(self, job_id: str):
         def _callback(**kwargs) -> None:
+            job = self._store.get_job(job_id)
+            if job is not None and job.status == "cancelled":
+                raise KnowledgeIngestCancelled()
             self._store.update_progress(job_id, **kwargs)
 
         return _callback

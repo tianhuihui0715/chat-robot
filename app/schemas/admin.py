@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.chat import SourceChunk
@@ -8,6 +10,12 @@ class RAGRuntimeConfig(BaseModel):
     top_k: int = Field(ge=1, le=20)
     score_threshold: float = Field(ge=0.0, le=1.0)
     candidate_multiplier: int = Field(ge=1, le=10)
+    rerank_candidate_limit: int = Field(default=12, ge=1, le=50)
+    retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
+    bm25_top_k: int = Field(default=8, ge=1, le=50)
+    bm25_title_boost: float = Field(default=2.0, ge=0.1, le=10.0)
+    rrf_k: int = Field(default=60, ge=1, le=200)
+    rrf_min_score: float = Field(default=0.016, ge=0.0, le=1.0)
     chunk_size: int = Field(ge=100, le=4000)
     chunk_overlap: int = Field(ge=0, le=1000)
     reranker_enabled: bool = True
@@ -19,6 +27,12 @@ class RAGRuntimeConfigUpdate(BaseModel):
     top_k: int = Field(ge=1, le=20)
     score_threshold: float = Field(ge=0.0, le=1.0)
     candidate_multiplier: int = Field(ge=1, le=10)
+    rerank_candidate_limit: int = Field(default=12, ge=1, le=50)
+    retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
+    bm25_top_k: int = Field(default=8, ge=1, le=50)
+    bm25_title_boost: float = Field(default=2.0, ge=0.1, le=10.0)
+    rrf_k: int = Field(default=60, ge=1, le=200)
+    rrf_min_score: float = Field(default=0.016, ge=0.0, le=1.0)
     chunk_size: int = Field(ge=100, le=4000)
     chunk_overlap: int = Field(ge=0, le=1000)
     reranker_enabled: bool
@@ -30,6 +44,7 @@ class TraceDetailPreview(BaseModel):
     step_limit: int
     has_more_steps: bool = False
     output_truncated: bool = False
+    snapshot: dict | None = None
 
 
 class TracePageResponse(BaseModel):
@@ -44,6 +59,12 @@ class RAGCompareVariant(BaseModel):
     top_k: int = Field(ge=1, le=20)
     score_threshold: float = Field(ge=0.0, le=1.0)
     candidate_multiplier: int = Field(ge=1, le=10)
+    rerank_candidate_limit: int = Field(default=12, ge=1, le=50)
+    retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
+    bm25_top_k: int = Field(default=8, ge=1, le=50)
+    bm25_title_boost: float = Field(default=2.0, ge=0.1, le=10.0)
+    rrf_k: int = Field(default=60, ge=1, le=200)
+    rrf_min_score: float = Field(default=0.016, ge=0.0, le=1.0)
     reranker_enabled: bool = True
 
 
@@ -119,13 +140,18 @@ class RAGLabVariant(BaseModel):
     chunk_size: int = Field(ge=100, le=4000)
     chunk_overlap_ratio: float = Field(ge=0.0, le=0.8)
     retrieval_k: int = Field(ge=1, le=20)
+    retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
+    bm25_top_k: int = Field(default=8, ge=1, le=50)
+    bm25_title_boost: float = Field(default=2.0, ge=0.1, le=10.0)
+    rrf_k: int = Field(default=60, ge=1, le=200)
     rerank_k: int = Field(ge=0, le=20)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
 
     @model_validator(mode="after")
     def validate_rerank_k(self):
-        if self.rerank_k > self.retrieval_k:
-            raise ValueError("rerank_k cannot be greater than retrieval_k")
+        candidate_limit = max(self.retrieval_k, self.bm25_top_k)
+        if self.rerank_k > candidate_limit:
+            raise ValueError("rerank_k cannot be greater than the available candidate count")
         return self
 
 
@@ -141,6 +167,12 @@ class RAGLabSourcePreview(BaseModel):
     preview: str
     content_full: str
     score: float
+    retrieval_mode: str | None = None
+    fusion_sources: str | None = None
+    chunk_id: str | None = None
+    chunk_ids: str | None = None
+    merged_chunk_count: str | None = None
+    citation_index: str | None = None
 
 
 class RAGLabQuestionResult(BaseModel):
@@ -156,6 +188,10 @@ class RAGLabVariantResult(BaseModel):
     chunk_size: int
     chunk_overlap_ratio: float
     retrieval_k: int
+    retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
+    bm25_top_k: int = 8
+    bm25_title_boost: float = 2.0
+    rrf_k: int = 60
     rerank_k: int
     temperature: float
     questions: list[RAGLabQuestionResult] = Field(default_factory=list)

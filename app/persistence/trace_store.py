@@ -133,6 +133,27 @@ class SQLTraceStore:
             step.record_ref_id = record_ref_id
             step.completed_at = utcnow()
 
+    def create_completed_step(
+        self,
+        request_id: str,
+        step_type: str,
+        step_order: int,
+        latency_ms: int,
+    ) -> str:
+        step_id = str(uuid4())
+        step = TraceStep(
+            step_id=step_id,
+            request_id=request_id,
+            step_type=step_type,
+            step_order=step_order,
+            status="completed",
+            latency_ms=latency_ms,
+            completed_at=utcnow(),
+        )
+        with self.session() as session:
+            session.add(step)
+        return step_id
+
     def fail_step(self, step_id: str, latency_ms: int, error_message: str) -> None:
         with self.session() as session:
             step = session.get(TraceStep, step_id)
