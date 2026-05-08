@@ -30,6 +30,9 @@ ENV_MAPPING = {
     "INFERENCE_RUNTIME_MODE": "inference_runtime_mode",
     "INFERENCE_SERVICE_URL": "inference_service_url",
     "INFERENCE_TIMEOUT_SECONDS": "inference_timeout_seconds",
+    "PLANNER_ENABLED": "planner_enabled",
+    "PLANNER_INFERENCE_SERVICE_URL": "planner_inference_service_url",
+    "PLANNER_TIMEOUT_SECONDS": "planner_timeout_seconds",
     "TRACE_STORE_DSN": "trace_store_dsn",
     "HOST_MODEL_ROOT": "host_model_root",
     "LLM_MODEL_PATH": "llm_model_path",
@@ -38,14 +41,21 @@ ENV_MAPPING = {
     "RERANKER_MODEL_PATH": "reranker_model_path",
     "LLM_MAX_INPUT_TOKENS": "llm_max_input_tokens",
     "LLM_MAX_NEW_TOKENS": "llm_max_new_tokens",
+    "PLANNER_MAX_NEW_TOKENS": "planner_max_new_tokens",
     "LLM_TEMPERATURE": "llm_temperature",
     "GPU_QUEUE_MAXSIZE": "gpu_queue_maxsize",
     "RAG_TOP_K": "rag_top_k",
+    "RAG_PLAN_TOP_K": "rag_plan_top_k",
     "RAG_SCORE_THRESHOLD": "rag_score_threshold",
+    "RAG_PLAN_CANDIDATE_MULTIPLIER": "rag_plan_candidate_multiplier",
     "RAG_RERANK_CANDIDATE_LIMIT": "rag_rerank_candidate_limit",
+    "RAG_PLAN_RERANK_CANDIDATE_LIMIT": "rag_plan_rerank_candidate_limit",
+    "RAG_PLAN_MAX_RETRIES": "rag_plan_max_retries",
+    "RAG_PLAN_RETRY_MULTIPLIER": "rag_plan_retry_multiplier",
     "RAG_COLLECTION_NAME": "rag_collection_name",
     "RAG_RETRIEVAL_MODE": "rag_retrieval_mode",
     "RAG_BM25_TOP_K": "rag_bm25_top_k",
+    "RAG_PLAN_BM25_TOP_K": "rag_plan_bm25_top_k",
     "RAG_BM25_TITLE_BOOST": "rag_bm25_title_boost",
     "RAG_RRF_K": "rag_rrf_k",
     "RAG_RRF_MIN_SCORE": "rag_rrf_min_score",
@@ -81,6 +91,9 @@ class Settings(BaseModel):
     inference_runtime_mode: Literal["mock", "local_hf"] = "mock"
     inference_service_url: str = "http://localhost:8001"
     inference_timeout_seconds: float = 60.0
+    planner_enabled: bool = True
+    planner_inference_service_url: str | None = None
+    planner_timeout_seconds: float = 90.0
     trace_store_dsn: str = "sqlite:///./data/chat_robot.db"
 
     host_model_root: str = "/root/models"
@@ -91,15 +104,22 @@ class Settings(BaseModel):
 
     llm_max_input_tokens: int = 8192
     llm_max_new_tokens: int = 512
+    planner_max_new_tokens: int = 512
     llm_temperature: float = 0.0
     gpu_queue_maxsize: int = 100
 
     rag_top_k: int = 4
+    rag_plan_top_k: int = 8
     rag_score_threshold: float = 0.1
+    rag_plan_candidate_multiplier: int = 4
     rag_rerank_candidate_limit: int = 12
+    rag_plan_rerank_candidate_limit: int = 24
+    rag_plan_max_retries: int = 1
+    rag_plan_retry_multiplier: int = 2
     rag_collection_name: str = "knowledge_chunks"
     rag_retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
     rag_bm25_top_k: int = 8
+    rag_plan_bm25_top_k: int = 16
     rag_bm25_title_boost: float = 2.0
     rag_rrf_k: int = 60
     rag_rrf_min_score: float = 0.016
@@ -124,8 +144,8 @@ class Settings(BaseModel):
     langsmith_project: str = "chat-robot"
     langsmith_endpoint: str = "https://api.smith.langchain.com"
     langsmith_api_key: str | None = None
-    intent_prompt_role: str = "你是一个中文对话系统的意图识别器，只能输出一个 JSON 对象，不能输出解释。"
-    intent_prompt_task: str = "根据完整对话历史，判断最后一条用户消息的 intent、是否需要检索、检索词改写和简短依据。"
+    intent_prompt_role: str = "你是一个中文对话系统的路由决策器，只能输出一个 JSON 对象，不能输出解释。"
+    intent_prompt_task: str = "根据完整对话历史，判断最后一条用户消息的 intent、是否需要检索、是否应该先追问澄清，以及执行模式应该走 direct、rag 还是 plan_execute。"
     intent_prompt_available_intents: list[str] = [
         "chat",
         "knowledge_qa",
@@ -138,6 +158,9 @@ class Settings(BaseModel):
         "task: 明确要求执行任务、编写代码、制定方案、产出结构化结果。",
         "follow_up: 明显依赖上一轮上下文的追问、补充、澄清；如果脱离上文无法完整理解，应优先判为 follow_up。",
         "如果最后一句同时像知识问答又明显依赖上文，请优先使用 follow_up，而不是 knowledge_qa。",
+        "should_clarify: 当用户意图过于模糊、缺少环境信息、缺少报错信息或目标范围不清晰时，设为 true，并给出一句简短澄清问题。",
+        "execution_mode: direct 表示直接回答；rag 表示直接检索后回答；plan_execute 表示先拆解任务，再执行子任务并聚合结果。",
+        "candidate_tools: 只有在 execution_mode=plan_execute 时填写，可选值只有 retrieval.search 和 answer.direct。",
         "reject: 涉及违法、危险或不应回答的请求。",
         "其余情况一律使用 chat。",
     ]
@@ -148,9 +171,9 @@ class Settings(BaseModel):
         "如果 need_rag=false，rewrite_query 直接等于最后一条用户消息。",
         "不要输出“您有什么问题吗”“请提供更多信息”之类泛化句子。",
     ]
-    intent_prompt_rationale_rule: str = "rationale 用一句简短中文说明依据。"
+    intent_prompt_rationale_rule: str = "rationale 用一句简短中文说明依据；clarify_question 也必须是简短中文。"
     intent_prompt_output_schema: str = (
-        '{"intent":"chat","need_rag":false,"rewrite_query":"原问题","rationale":"判断依据"}'
+        '{"intent":"chat","need_rag":false,"rewrite_query":"原问题","rationale":"判断依据","execution_mode":"direct","should_clarify":false,"clarify_question":null,"candidate_tools":[]}'
     )
     intent_prompt_examples: list[dict[str, str]] = []
 
@@ -177,6 +200,9 @@ def _load_config_defaults() -> dict[str, Any]:
                     "inference_runtime_mode": data.get("runtime", {}).get("inference_mode"),
                     "inference_service_url": data.get("runtime", {}).get("inference_service_url"),
                     "inference_timeout_seconds": data.get("runtime", {}).get("inference_timeout_seconds"),
+                    "planner_enabled": data.get("runtime", {}).get("planner_enabled"),
+                    "planner_inference_service_url": data.get("runtime", {}).get("planner_inference_service_url"),
+                    "planner_timeout_seconds": data.get("runtime", {}).get("planner_timeout_seconds"),
                     "trace_store_dsn": data.get("observability", {}).get("trace_store_dsn"),
                     "langsmith_enabled": data.get("observability", {}).get("langsmith_enabled"),
                     "langsmith_project": data.get("observability", {}).get("langsmith_project"),
@@ -205,6 +231,7 @@ def _load_config_defaults() -> dict[str, Any]:
                     "reranker_model_path": data.get("paths", {}).get("reranker_model_path"),
                     "llm_max_input_tokens": data.get("generation", {}).get("llm_max_input_tokens"),
                     "llm_max_new_tokens": data.get("generation", {}).get("llm_max_new_tokens"),
+                    "planner_max_new_tokens": data.get("generation", {}).get("planner_max_new_tokens"),
                     "llm_temperature": data.get("generation", {}).get("llm_temperature"),
                     "gpu_queue_maxsize": data.get("generation", {}).get("gpu_queue_maxsize"),
                 }
@@ -213,11 +240,17 @@ def _load_config_defaults() -> dict[str, Any]:
             merged.update(
                 {
                     "rag_top_k": data.get("rag", {}).get("top_k"),
+                    "rag_plan_top_k": data.get("rag", {}).get("plan_top_k"),
                     "rag_score_threshold": data.get("rag", {}).get("score_threshold"),
+                    "rag_plan_candidate_multiplier": data.get("rag", {}).get("plan_candidate_multiplier"),
                     "rag_rerank_candidate_limit": data.get("rag", {}).get("rerank_candidate_limit"),
+                    "rag_plan_rerank_candidate_limit": data.get("rag", {}).get("plan_rerank_candidate_limit"),
+                    "rag_plan_max_retries": data.get("rag", {}).get("plan_max_retries"),
+                    "rag_plan_retry_multiplier": data.get("rag", {}).get("plan_retry_multiplier"),
                     "rag_collection_name": data.get("rag", {}).get("collection_name"),
                     "rag_retrieval_mode": data.get("rag", {}).get("retrieval_mode"),
                     "rag_bm25_top_k": data.get("rag", {}).get("bm25_top_k"),
+                    "rag_plan_bm25_top_k": data.get("rag", {}).get("plan_bm25_top_k"),
                     "rag_bm25_title_boost": data.get("rag", {}).get("bm25_title_boost"),
                     "rag_rrf_k": data.get("rag", {}).get("rrf_k"),
                     "rag_rrf_min_score": data.get("rag", {}).get("rrf_min_score"),

@@ -49,6 +49,18 @@
       title: "重排序",
       description: "用 reranker 对候选 chunk 重新打分排序。",
     },
+    plan_execution_planning: {
+      title: "规划执行",
+      description: "复杂问题先规划子任务、检索策略和聚合方式。",
+    },
+    subtask_execution: {
+      title: "子任务执行",
+      description: "并行执行多个子任务，包括独立检索和阶段性结果整理。",
+    },
+    subtask_completion: {
+      title: "子任务完成",
+      description: "把单个子任务的召回结果整理成结构化结果对象。",
+    },
     llm_generation: {
       title: "LLM 生成",
       description: "把用户问题和最终来源片段交给模型生成回答。",
@@ -179,7 +191,7 @@
     selectedSteps.textContent = String(trace.steps?.length ?? 0);
     traceViewAll.hidden = !wrapper.has_more_steps && !wrapper.output_truncated;
 
-    renderSummary(trace);
+    renderSummary(trace, wrapper.snapshot);
     renderTimeline(trace.steps || []);
     renderSnapshot(wrapper.snapshot);
 
@@ -187,15 +199,21 @@
     renderLazyJson(traceRaw, trace, "点击“查看完整 JSON”后展示完整 trace 原始数据。");
   }
 
-  function renderSummary(trace) {
+  function renderSummary(trace, snapshot) {
     traceSummary.innerHTML = "";
     const summaryCard = document.createElement("div");
     summaryCard.className = "trace-summary";
+    const metrics = deriveExecutionMetrics(trace, snapshot);
     [
       ["用户输入", trace.user_input || "-"],
       ["意图", labelIntent(trace.intent) || "-"],
       ["是否走知识库", trace.need_rag ? "是" : "否"],
       ["改写查询", trace.intent_record?.rewrite_query || "-"],
+      ["执行模式", metrics.executionMode],
+      ["Planner 来源", metrics.plannerSource],
+      ["补检索次数", String(metrics.retryCount)],
+      ["聚合置信度", metrics.aggregateConfidence],
+      ["规划检索档位", metrics.retrievalProfile],
       ["创建时间", formatDateTime(trace.created_at)],
     ].forEach(([label, value]) => {
       const line = document.createElement("p");
@@ -319,6 +337,7 @@
       createMetric("意图", labelIntent(intent?.intent) || "-"),
       createMetric("是否检索", intent?.need_rag ? "是" : "否"),
       createMetric("改写查询", intent?.rewrite_query || "-"),
+      createMetric("执行模式", intent?.execution_mode || "-"),
     );
     const reason = document.createElement("p");
     reason.className = "snapshot-note";
@@ -519,6 +538,28 @@
       generation_record: "生成记录",
     };
     return labels[recordRefType] || "无";
+  }
+
+  function deriveExecutionMetrics(trace, snapshot) {
+    const intentOutput = trace.intent_record?.model_output || {};
+    const generation = snapshot?.generation || {};
+    const plannerPlan = generation.planner_plan || null;
+    const subtaskResults = Array.isArray(generation.subtask_results) ? generation.subtask_results : [];
+    const aggregateResult = generation.aggregate_result || null;
+    const retrievalProfile = generation.plan_execute_profile || null;
+    const retryCount = subtaskResults.reduce((total, item) => total + Number(item?.retry_count || 0), 0);
+
+    return {
+      executionMode: intentOutput.execution_mode || snapshot?.intent?.execution_mode || "-",
+      plannerSource: plannerPlan?.planner_source || "-",
+      retryCount,
+      aggregateConfidence: Number.isFinite(Number(aggregateResult?.confidence))
+        ? Number(aggregateResult.confidence).toFixed(2)
+        : "-",
+      retrievalProfile: retrievalProfile
+        ? `top_k=${retrievalProfile.top_k}, rerank=${retrievalProfile.rerank_candidate_limit}, bm25=${retrievalProfile.bm25_top_k}`
+        : "-",
+    };
   }
 
   function labelMetadata(key) {

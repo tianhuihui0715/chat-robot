@@ -50,6 +50,10 @@
                   <input id="rag-top-k" type="number" min="1" max="20" />
                 </label>
                 <label class="stack-form__label">
+                  Plan Top K
+                  <input id="rag-plan-top-k" type="number" min="1" max="30" />
+                </label>
+                <label class="stack-form__label">
                   Score Threshold
                   <input id="rag-score-threshold" type="number" min="0" max="1" step="0.01" />
                 </label>
@@ -58,8 +62,16 @@
                   <input id="rag-candidate-multiplier" type="number" min="1" max="10" />
                 </label>
                 <label class="stack-form__label">
+                  Plan Candidate Multiplier
+                  <input id="rag-plan-candidate-multiplier" type="number" min="1" max="12" />
+                </label>
+                <label class="stack-form__label">
                   Rerank Candidate Limit
                   <input id="rag-rerank-candidate-limit" type="number" min="1" max="50" />
+                </label>
+                <label class="stack-form__label">
+                  Plan Rerank Limit
+                  <input id="rag-plan-rerank-candidate-limit" type="number" min="1" max="80" />
                 </label>
                 <label class="stack-form__label">
                   Retrieval Mode
@@ -72,6 +84,10 @@
                 <label class="stack-form__label">
                   BM25 Top K
                   <input id="rag-bm25-top-k" type="number" min="1" max="50" />
+                </label>
+                <label class="stack-form__label">
+                  Plan BM25 Top K
+                  <input id="rag-plan-bm25-top-k" type="number" min="1" max="80" />
                 </label>
                 <label class="stack-form__label">
                   BM25 Title Boost
@@ -92,6 +108,14 @@
                 <label class="stack-form__label">
                   Chunk Overlap
                   <input id="rag-chunk-overlap" type="number" min="0" max="1000" />
+                </label>
+                <label class="stack-form__label">
+                  Plan Max Retries
+                  <input id="rag-plan-max-retries" type="number" min="0" max="4" />
+                </label>
+                <label class="stack-form__label">
+                  Plan Retry Multiplier
+                  <input id="rag-plan-retry-multiplier" type="number" min="1" max="4" />
                 </label>
                 <label class="toggle">
                   <input id="rag-reranker-enabled" type="checkbox" />
@@ -136,10 +160,23 @@
             </div>
           </section>
         </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Default Eval</p>
+              <h2>复杂题默认回归集</h2>
+            </div>
+            <button class="button button--ghost" id="rag-eval-run" type="button">运行默认评测</button>
+          </div>
+          <p class="hint" id="rag-eval-hint">会使用当前正式配置，对比一套 plan_execute 增强检索档位，验证复杂题的来源命中和回答命中情况。</p>
+          <div class="metrics-grid" id="rag-eval-summary"></div>
+          <div class="mini-list" id="rag-eval-cases"></div>
+        </section>
       </main>
     </div>
 
     <script src="/static/js/admin-common.js?v=20260423-admin9" defer></script>
-    <script src="/static/js/admin-rag.js?v=20260426-rag-filter1" defer></script>
+    <script src="/static/js/admin-rag.js?v=20260428-rag-eval2" defer></script>
   </body>
 </html>

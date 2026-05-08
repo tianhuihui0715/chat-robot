@@ -11,6 +11,8 @@ class InferenceGenerateRequest(BaseModel):
     sources: list[SourceChunk] = Field(default_factory=list)
     max_new_tokens: int | None = Field(default=None, ge=1)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    response_mode: Literal["answer", "json"] = "answer"
+    system_prompt_override: str | None = None
 
 
 class InferenceGenerateResponse(BaseModel):

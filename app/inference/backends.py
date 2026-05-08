@@ -55,6 +55,9 @@ class MockInferenceBackend:
         return None
 
     async def generate(self, request: InferenceGenerateRequest) -> str:
+        if request.response_mode == "json":
+            return _mock_generation_json_response(request)
+
         latest_user_message = next(
             (message.content for message in reversed(request.messages) if message.role == "user"),
             "",
@@ -180,10 +183,13 @@ class LocalHFGenerationBackend:
         self._torch = None
 
     def _build_chat_messages(self, request: InferenceGenerateRequest) -> list[dict[str, str]]:
-        system_parts = [
-            "你是一个本地部署的中文 AI 助手。",
-            "请直接给出答案，不要输出思考过程，也不要输出 <think> 标签。",
-        ]
+        if request.system_prompt_override:
+            system_parts = [request.system_prompt_override.strip()]
+        else:
+            system_parts = [
+                "你是一个本地部署的中文 AI 助手。",
+                "请直接给出答案，不要输出思考过程，也不要输出 <think> 标签。",
+            ]
 
         if request.sources:
             source_sections = []
@@ -327,18 +333,20 @@ class LocalHFIntentBackend:
             "",
         ).strip()
         if label == "task":
-            decision = IntentDecision(
+            decision = _build_intent_decision(
                 intent="task",
                 need_rag=False,
                 rewrite_query=latest_user_message,
                 rationale="规则粗筛后由模型二分类判定为 task。",
+                messages=messages,
             )
         else:
-            decision = IntentDecision(
+            decision = _build_intent_decision(
                 intent="knowledge_qa",
                 need_rag=True,
                 rewrite_query=_normalize_knowledge_query(latest_user_message),
                 rationale="规则粗筛后由模型二分类判定为 knowledge_qa。",
+                messages=messages,
             )
         return decision, cleaned_output
 
@@ -601,6 +609,84 @@ def _format_conversation(messages: list[ChatMessage]) -> str:
     )
 
 
+def _mock_generation_json_response(request: InferenceGenerateRequest) -> str:
+    latest_user_message = next(
+        (message.content for message in reversed(request.messages) if message.role == "user"),
+        "",
+    ).strip()
+    normalized = latest_user_message.replace(" ", "")
+    system_prompt = (request.system_prompt_override or "").lower()
+
+    if "检索规划器" in system_prompt or "plan json" in system_prompt:
+        if _looks_like_planner_question(normalized):
+            merge_strategy, answer_style = _mock_planner_strategy(normalized)
+            return json.dumps(
+                {
+                    "mode": "plan_rag",
+                    "reason": "问题涉及多个对象和共同点统计，适合拆成多次检索后汇总。",
+                    "primary_query": request.intent.rewrite_query or latest_user_message,
+                    "subqueries": _build_mock_subqueries(request.intent.rewrite_query or latest_user_message),
+                    "merge_strategy": merge_strategy,
+                    "answer_style": answer_style,
+                },
+                ensure_ascii=False,
+            )
+        if any(token in normalized for token in ("文档", "配置", "部署", "接口", "知识库", "trace")):
+            return json.dumps(
+                {
+                    "mode": "single_retrieval",
+                    "reason": "问题依赖项目知识或配置细节，单次检索即可。",
+                    "primary_query": request.intent.rewrite_query or latest_user_message,
+                    "subqueries": [],
+                    "merge_strategy": "union",
+                    "answer_style": "summary",
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "mode": "answer_direct",
+                "reason": "问题可以直接回答。",
+                "primary_query": request.intent.rewrite_query or latest_user_message,
+                "subqueries": [],
+                "merge_strategy": "union",
+                "answer_style": "summary",
+            },
+            ensure_ascii=False,
+        )
+
+    if "子任务执行器" in system_prompt or "subtask json" in system_prompt:
+        items = _extract_mock_items_from_inference_sources(request.sources)
+        return json.dumps(
+            {
+                "items": items,
+                "count": len(items),
+                "summary": "已根据子任务来源提取候选结果。",
+                "notes": "mock 子任务执行结果。",
+            },
+            ensure_ascii=False,
+        )
+
+    if any(token in normalized for token in ("文档", "配置", "部署", "接口", "知识库", "trace")):
+        return json.dumps(
+            {
+                "action": "retrieval.search",
+                "query": request.intent.rewrite_query or latest_user_message,
+                "reason": "问题依赖项目知识或配置细节，先检索再回答。",
+            },
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "action": "answer.direct",
+            "query": request.intent.rewrite_query or latest_user_message,
+            "reason": "问题可以直接回答，不需要额外检索。",
+        },
+        ensure_ascii=False,
+    )
+
+
 def _heuristic_intent_decision(messages: list[ChatMessage]) -> IntentDecision:
     rag_keywords = (
         "文档",
@@ -613,6 +699,10 @@ def _heuristic_intent_decision(messages: list[ChatMessage]) -> IntentDecision:
         "如何",
         "查询",
         "项目",
+        "哪些",
+        "统计",
+        "比较",
+        "对比",
     )
     latest_user_message = next(
         (message.content for message in reversed(messages) if message.role == "user"),
@@ -621,20 +711,27 @@ def _heuristic_intent_decision(messages: list[ChatMessage]) -> IntentDecision:
     need_rag = any(keyword in latest_user_message for keyword in rag_keywords)
 
     if need_rag:
-        intent = "knowledge_qa"
-        rationale = "命中了知识问答关键词，优先尝试走检索增强生成。"
-    elif len(messages) > 1:
-        intent = "follow_up"
-        rationale = "检测到多轮上下文，先按追问处理。"
-    else:
-        intent = "chat"
-        rationale = "未命中检索关键词，按普通对话处理。"
-
-    return IntentDecision(
-        intent=intent,
-        need_rag=need_rag,
+        return _build_intent_decision(
+            intent="knowledge_qa",
+            need_rag=True,
+            rewrite_query=latest_user_message,
+            rationale="命中了知识问答关键词，优先尝试走检索增强生成。",
+            messages=messages,
+        )
+    if len(messages) > 1:
+        return _build_intent_decision(
+            intent="follow_up",
+            need_rag=False,
+            rewrite_query=latest_user_message,
+            rationale="检测到多轮上下文，先按追问处理。",
+            messages=messages,
+        )
+    return _build_intent_decision(
+        intent="chat",
+        need_rag=False,
         rewrite_query=latest_user_message,
-        rationale=rationale,
+        rationale="未命中检索关键词，按普通对话处理。",
+        messages=messages,
     )
 
 
@@ -660,11 +757,16 @@ def _parse_intent_decision(output: str, messages: list[ChatMessage]) -> IntentDe
     rationale = decision.rationale.strip() or fallback.rationale
     need_rag = decision.need_rag if decision.intent != "reject" else False
 
-    return IntentDecision(
+    return _build_intent_decision(
         intent=decision.intent,
         need_rag=need_rag,
         rewrite_query=rewrite_query,
         rationale=rationale,
+        messages=messages,
+        preferred_mode=decision.execution_mode,
+        should_clarify=decision.should_clarify,
+        clarify_question=decision.clarify_question,
+        candidate_tools=decision.candidate_tools,
     )
 
 
@@ -768,45 +870,50 @@ def _rule_based_intent_decision(messages: list[ChatMessage]) -> IntentDecision |
         return None
 
     if _matches_reject_rule(latest_user_message):
-        return IntentDecision(
+        return _build_intent_decision(
             intent="reject",
             need_rag=False,
             rewrite_query=latest_user_message,
             rationale="命中高风险请求规则，判定为 reject。",
+            messages=messages,
         )
 
     if _matches_chat_rule(latest_user_message):
-        return IntentDecision(
+        return _build_intent_decision(
             intent="chat",
             need_rag=False,
             rewrite_query=latest_user_message,
             rationale="命中问候或闲聊规则，判定为 chat。",
+            messages=messages,
         )
 
     if _looks_like_follow_up_by_rules(messages):
         expanded_query = _expand_follow_up_query(latest_user_message, messages)
         need_rag = _follow_up_needs_rag(expanded_query, messages)
-        return IntentDecision(
+        return _build_intent_decision(
             intent="follow_up",
             need_rag=need_rag,
             rewrite_query=expanded_query,
             rationale="命中上下文追问规则，判定为 follow_up。",
+            messages=messages,
         )
 
     if _matches_task_rule(latest_user_message):
-        return IntentDecision(
+        return _build_intent_decision(
             intent="task",
             need_rag=False,
             rewrite_query=latest_user_message,
             rationale="命中任务执行规则，判定为 task。",
+            messages=messages,
         )
 
     if _matches_knowledge_rule(latest_user_message):
-        return IntentDecision(
+        return _build_intent_decision(
             intent="knowledge_qa",
             need_rag=True,
             rewrite_query=_normalize_knowledge_query(latest_user_message),
             rationale="命中知识问答规则，判定为 knowledge_qa。",
+            messages=messages,
         )
 
     return None
@@ -1037,6 +1144,264 @@ def _parse_task_or_qa_label(text: str) -> str | None:
     if re.search(r"\btask\b", normalized):
         return "task"
     return None
+
+
+def _build_intent_decision(
+    *,
+    intent: str,
+    need_rag: bool,
+    rewrite_query: str,
+    rationale: str,
+    messages: list[ChatMessage],
+    preferred_mode: str | None = None,
+    should_clarify: bool = False,
+    clarify_question: str | None = None,
+    candidate_tools: list[str] | None = None,
+) -> IntentDecision:
+    latest_user_message = next(
+        (message.content for message in reversed(messages) if message.role == "user"),
+        "",
+    ).strip()
+    (
+        execution_mode,
+        resolved_clarify,
+        resolved_clarify_question,
+        resolved_candidate_tools,
+        planner_hint,
+    ) = _resolve_execution_controls(
+        intent=intent,
+        need_rag=need_rag,
+        rewrite_query=rewrite_query,
+        latest_user_message=latest_user_message,
+        messages=messages,
+        preferred_mode=preferred_mode,
+        should_clarify=should_clarify,
+        clarify_question=clarify_question,
+        candidate_tools=candidate_tools,
+    )
+    return IntentDecision(
+        intent=intent,
+        need_rag=need_rag,
+        rewrite_query=rewrite_query,
+        rationale=rationale,
+        execution_mode=execution_mode,
+        should_clarify=resolved_clarify,
+        clarify_question=resolved_clarify_question,
+        candidate_tools=resolved_candidate_tools,
+        planner_hint=planner_hint,
+    )
+
+
+def _resolve_execution_controls(
+    *,
+    intent: str,
+    need_rag: bool,
+    rewrite_query: str,
+    latest_user_message: str,
+    messages: list[ChatMessage],
+    preferred_mode: str | None,
+    should_clarify: bool,
+    clarify_question: str | None,
+    candidate_tools: list[str] | None,
+) -> tuple[str, bool, str | None, list[str], str | None]:
+    if intent == "reject":
+        return "direct", False, None, [], None
+
+    fallback_clarify_question = _maybe_build_clarify_question(
+        latest_user_message=latest_user_message,
+        messages=messages,
+        intent=intent,
+    )
+    normalized_clarify_question = (clarify_question or "").strip() or fallback_clarify_question
+    if should_clarify or normalized_clarify_question:
+        return "direct", True, normalized_clarify_question, [], None
+
+    if intent == "chat":
+        return "direct", False, None, [], None
+
+    if need_rag:
+        default_mode = "plan_execute" if _should_use_plan_execute(rewrite_query or latest_user_message) else "rag"
+        execution_mode = preferred_mode if preferred_mode in {"rag", "plan_execute"} else default_mode
+        if execution_mode == "plan_execute":
+            return (
+                "plan_execute",
+                False,
+                None,
+                _normalize_candidate_tools(candidate_tools or ["retrieval.search", "answer.direct"]),
+                _build_planner_hint(rewrite_query or latest_user_message),
+            )
+        return "rag", False, None, [], None
+
+    return "direct", False, None, [], None
+
+
+def _normalize_candidate_tools(candidate_tools: list[str]) -> list[str]:
+    allowed = {"retrieval.search", "answer.direct"}
+    normalized: list[str] = []
+    for tool in candidate_tools:
+        compact = tool.strip()
+        if compact and compact in allowed and compact not in normalized:
+            normalized.append(compact)
+    if not normalized:
+        return ["retrieval.search", "answer.direct"]
+    return normalized
+
+
+def _build_planner_hint(query: str) -> str | None:
+    normalized = query.replace(" ", "")
+    if not normalized:
+        return None
+    if any(marker in normalized for marker in ("共同", "都", "交集", "同时出现", "并且", "也在")):
+        return "问题更像集合交集，请优先拆出多个检索对象并保留共同信息。"
+    if any(marker in normalized for marker in ("排序", "排名", "最多", "最少", "从多到少", "从少到多")):
+        return "问题更像排序题，请拆成多个对象分别检索，再按数量或覆盖度排序。"
+    if any(marker in normalized for marker in ("分组", "分别", "各自", "归类")):
+        return "问题更像分组题，请拆成多个对象分别检索，并按对象分组组织答案。"
+    if any(marker in normalized for marker in ("去重", "汇总", "合并", "整理全部")):
+        return "问题更像去重汇总题，请拆成多个对象分别检索，再做去重合并。"
+    if any(marker in normalized for marker in ("对比", "比较", "差异", "分别")):
+        return "问题更像对比题，请拆成多个对象分别检索，再按差异或共同点组织答案。"
+    if any(marker in normalized for marker in ("统计", "汇总", "列出全部", "综合")):
+        return "问题需要汇总多个检索结果，请尽量拆成清晰的子查询。"
+    return None
+
+
+def _maybe_build_clarify_question(
+    *,
+    latest_user_message: str,
+    messages: list[ChatMessage],
+    intent: str,
+) -> str | None:
+    if intent in {"reject", "chat"}:
+        return None
+
+    normalized = latest_user_message.strip().lower()
+    if not normalized:
+        return "你想让我先处理哪一部分？可以补充一下具体目标、环境或报错信息。"
+
+    has_context = any(
+        message.role in {"user", "assistant"} and message.content.strip()
+        for message in messages[:-1]
+    )
+    if has_context:
+        return None
+
+    vague_patterns = (
+        "帮我看看",
+        "帮我分析",
+        "分析一下",
+        "看下这个",
+        "看看这个",
+        "这个怎么弄",
+        "这个怎么搞",
+        "怎么处理",
+        "部署问题",
+        "配置问题",
+        "帮我处理",
+        "帮我搞一下",
+        "帮我排查",
+        "帮我看看部署",
+        "帮我看看配置",
+    )
+    if not any(pattern in normalized for pattern in vague_patterns):
+        return None
+
+    if any(keyword in normalized for keyword in ("部署", "docker", "wsl", "windows", "linux")):
+        return "你想看哪种部署场景？可以补充一下运行环境、目标平台或具体报错。"
+    if any(keyword in normalized for keyword in ("配置", "参数", "环境变量", "模型")):
+        return "你想确认哪个配置项或运行环境？可以补充配置名、场景或报错信息。"
+    return "可以再补充一下你的具体目标、使用环境或报错信息吗？这样我更容易判断该直接回答、检索还是继续分析。"
+
+
+def _should_use_plan_execute(rewrite_query: str) -> bool:
+    normalized = rewrite_query.replace(" ", "")
+    if not normalized:
+        return False
+
+    markers = (
+        "对比",
+        "比较",
+        "评估",
+        "排查",
+        "分析",
+        "定位",
+        "原因",
+        "步骤",
+        "先",
+        "再",
+        "同时",
+        "分别",
+        "综合",
+        "汇总",
+        "差异",
+        "方案",
+        "共同",
+        "都",
+        "哪些",
+        "统计",
+        "交集",
+    )
+    hit_count = sum(1 for marker in markers if marker in normalized)
+    multi_entity = any(separator in normalized for separator in ("和", "与", "及", "、"))
+    return hit_count >= 2 or ("先" in normalized and "再" in normalized) or (multi_entity and hit_count >= 1)
+
+
+def _looks_like_planner_question(normalized_text: str) -> bool:
+    markers = (
+        "对比",
+        "比较",
+        "差异",
+        "统计",
+        "汇总",
+        "共同",
+        "都",
+        "分别",
+        "同时",
+        "交集",
+        "并且",
+        "也在",
+        "排序",
+        "排名",
+        "分组",
+        "归类",
+        "去重",
+    )
+    hit_count = sum(1 for marker in markers if marker in normalized_text)
+    multi_entity = any(separator in normalized_text for separator in ("和", "与", "及", "、", "并且"))
+    return hit_count >= 2 or (multi_entity and hit_count >= 1)
+
+
+def _mock_planner_strategy(normalized_text: str) -> tuple[str, str]:
+    if any(marker in normalized_text for marker in ("排序", "排名", "最多", "最少")):
+        return "rank", "table"
+    if any(marker in normalized_text for marker in ("分组", "分别", "各自", "归类")):
+        return "group_by", "table"
+    if any(marker in normalized_text for marker in ("去重", "汇总", "合并")):
+        return "dedupe_union", "list"
+    if any(marker in normalized_text for marker in ("共同", "都", "交集", "同时", "并且", "也在")):
+        return "intersection", "list"
+    return "union", "summary"
+
+
+def _build_mock_subqueries(query: str) -> list[str]:
+    separators = ("和", "与", "及", "、", "并且")
+    for separator in separators:
+        if separator in query:
+            left, right = query.split(separator, 1)
+            left = left.strip(" ，,。；;：:")
+            right = right.strip(" ，,。；;：:")
+            if left and right:
+                return [left, right]
+    return [query]
+
+
+def _extract_mock_items_from_inference_sources(sources: list) -> list[str]:
+    items: list[str] = []
+    for source in sources:
+        for token in ("九隂神功", "九阴真经", "降龙十八掌", "黯然销魂掌", "玉女剑法", "独孤九剑", "空明拳", "蛤蟆功"):
+            if token in getattr(source, "content", "") and token not in items:
+                items.append(token)
+    return items[:12]
 
 
 def _normalize_knowledge_query(text: str) -> str:

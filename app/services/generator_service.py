@@ -14,13 +14,19 @@ class GenerationRequest:
     intent: IntentDecision
     sources: list[SourceChunk]
     temperature: float | None = None
+    max_new_tokens: int | None = None
+    response_mode: str = "answer"
+    system_prompt_override: str | None = None
 
 
 def build_generation_prompt_messages(request: GenerationRequest) -> list[dict[str, str]]:
-    system_parts = [
-        "你是一个本地部署的中文 AI 助手。",
-        "请直接给出答案，不要输出思考过程，也不要输出 <think> 标签。",
-    ]
+    if request.system_prompt_override:
+        system_parts = [request.system_prompt_override.strip()]
+    else:
+        system_parts = [
+            "你是一个本地部署的中文 AI 助手。",
+            "请直接给出答案，不要输出思考过程，也不要输出 <think> 标签。",
+        ]
 
     if request.sources:
         source_sections = []
@@ -77,6 +83,9 @@ class MockGenerationBackend:
         return None
 
     async def generate(self, request: GenerationRequest) -> str:
+        if request.response_mode == "json":
+            return _mock_json_response(request)
+
         latest_user_message = next(
             (message.content for message in reversed(request.messages) if message.role == "user"),
             "",
@@ -136,8 +145,10 @@ class RemoteGenerationBackend:
             messages=request.messages,
             intent=request.intent,
             sources=request.sources,
-            max_new_tokens=self._max_new_tokens,
+            max_new_tokens=request.max_new_tokens or self._max_new_tokens,
             temperature=request.temperature,
+            response_mode=request.response_mode,
+            system_prompt_override=request.system_prompt_override,
         )
         response = await self._client.post("/generate", json=payload.model_dump(mode="json"))
         response.raise_for_status()
@@ -152,8 +163,10 @@ class RemoteGenerationBackend:
             messages=request.messages,
             intent=request.intent,
             sources=request.sources,
-            max_new_tokens=self._max_new_tokens,
+            max_new_tokens=request.max_new_tokens or self._max_new_tokens,
             temperature=request.temperature,
+            response_mode=request.response_mode,
+            system_prompt_override=request.system_prompt_override,
         )
 
         async with self._client.stream(
@@ -273,3 +286,234 @@ async def _iter_sse_payloads(response) -> AsyncIterator[dict]:
             if payload_line is None:
                 continue
             yield json.loads(payload_line[6:])
+
+
+def _mock_json_response(request: GenerationRequest) -> str:
+    latest_user_message = next(
+        (message.content for message in reversed(request.messages) if message.role == "user"),
+        "",
+    ).strip()
+    normalized = latest_user_message.replace(" ", "")
+    system_prompt = (request.system_prompt_override or "").lower()
+
+    if "子任务意图识别器" in system_prompt or "task intent json" in system_prompt:
+        latest_task_message = latest_user_message.replace(" ", "")
+        if "前置结果" in latest_user_message and any(
+            token in latest_task_message
+            for token in ("比较", "交集", "共同", "排序", "分组", "去重", "汇总")
+        ):
+            return json.dumps(
+                {
+                    "intent": "aggregation",
+                    "query": request.intent.rewrite_query or latest_user_message,
+                    "source_hint": "",
+                    "target": "",
+                    "knowledge_base_id": "",
+                    "reason": "当前任务主要基于前置结果做聚合处理。",
+                },
+                ensure_ascii=False,
+            )
+        if any(token in latest_task_message for token in ("列出", "统计", "出现过", "抽取", "提取", "哪些")):
+            source_hint = ""
+            if "射雕" in latest_task_message:
+                source_hint = "射雕英雄传"
+            elif "神雕" in latest_task_message:
+                source_hint = "神雕侠侣"
+            target = "武功" if any(token in latest_task_message for token in ("武功", "功夫")) else ""
+            return json.dumps(
+                {
+                    "intent": "extraction",
+                    "query": request.intent.rewrite_query or latest_user_message,
+                    "source_hint": source_hint,
+                    "target": target,
+                    "knowledge_base_id": "default" if source_hint else "",
+                    "reason": "当前任务需要从知识库中抽取特定对象列表。",
+                },
+                ensure_ascii=False,
+            )
+        if any(token in latest_task_message for token in ("文档", "文件", "资料", "配置", "接口", "部署")):
+            return json.dumps(
+                {
+                    "intent": "retrieval",
+                    "query": request.intent.rewrite_query or latest_user_message,
+                    "source_hint": "",
+                    "target": "",
+                    "knowledge_base_id": "",
+                    "reason": "当前任务更适合普通知识检索。",
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "intent": "direct",
+                "query": request.intent.rewrite_query or latest_user_message,
+                "source_hint": "",
+                "target": "",
+                "knowledge_base_id": "",
+                "reason": "当前任务不需要额外检索。",
+            },
+            ensure_ascii=False,
+        )
+
+    if "工具选择器" in system_prompt or "tool json" in system_prompt:
+        latest_task_message = latest_user_message.replace(" ", "")
+        if "前置结果" in latest_user_message and any(
+            token in latest_task_message
+            for token in ("比较", "交集", "共同", "排序", "分组", "去重", "汇总")
+        ):
+            return json.dumps(
+                {
+                    "tool": "answer.direct",
+                    "arguments": {
+                        "query": request.intent.rewrite_query or latest_user_message,
+                    },
+                    "reason": "当前任务主要基于前置结果推导，不需要额外工具。",
+                },
+                ensure_ascii=False,
+            )
+        if any(token in latest_task_message for token in ("文档", "文件", "资料")):
+            return json.dumps(
+                {
+                    "tool": "kb.document_lookup",
+                    "arguments": {"keyword": request.intent.rewrite_query or latest_user_message},
+                    "reason": "任务更像文档定位，优先查文档列表。",
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "tool": "retrieval.search",
+                "arguments": {
+                    "query": request.intent.rewrite_query or latest_user_message,
+                },
+                "reason": "当前任务需要先检索知识库片段。",
+            },
+            ensure_ascii=False,
+        )
+
+    if "知识库选择器" in system_prompt or "knowledge base json" in system_prompt:
+        latest_task_message = latest_user_message.replace(" ", "")
+        if any(token in latest_task_message for token in ("射雕", "神雕", "武功", "功夫")):
+            return json.dumps(
+                {
+                    "knowledge_base_id": "default",
+                    "reason": "任务涉及当前默认小说知识库中的作品和武功内容。",
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "knowledge_base_id": "default",
+                "reason": "默认选择当前最相关的知识库。",
+            },
+            ensure_ascii=False,
+        )
+
+    if "检索规划器" in system_prompt or "plan json" in system_prompt:
+        if _looks_like_planner_question(normalized):
+            merge_strategy, answer_style = _mock_planner_strategy(normalized)
+            return json.dumps(
+                {
+                    "mode": "plan_rag",
+                    "reason": "问题涉及多个对象和共同点统计，适合拆成多次检索后汇总。",
+                    "primary_query": request.intent.rewrite_query or latest_user_message,
+                    "subqueries": _build_mock_subqueries(request.intent.rewrite_query or latest_user_message),
+                    "merge_strategy": merge_strategy,
+                    "answer_style": answer_style,
+                },
+                ensure_ascii=False,
+            )
+        if any(token in normalized for token in ("文档", "配置", "部署", "接口", "知识库", "trace")):
+            return json.dumps(
+                {
+                    "mode": "single_retrieval",
+                    "reason": "问题依赖项目知识或配置细节，单次检索即可。",
+                    "primary_query": request.intent.rewrite_query or latest_user_message,
+                    "subqueries": [],
+                    "merge_strategy": "union",
+                    "answer_style": "summary",
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "mode": "answer_direct",
+                "reason": "问题可以直接回答。",
+                "primary_query": request.intent.rewrite_query or latest_user_message,
+                "subqueries": [],
+                "merge_strategy": "union",
+                "answer_style": "summary",
+            },
+            ensure_ascii=False,
+        )
+
+    if "子任务执行器" in system_prompt or "subtask json" in system_prompt:
+        items = _extract_mock_items_from_sources(request.sources)
+        return json.dumps(
+            {
+                "items": items,
+                "count": len(items),
+                "summary": "已根据子任务来源提取候选结果。",
+                "notes": "mock 子任务执行结果。",
+            },
+            ensure_ascii=False,
+        )
+
+    if any(token in normalized for token in ("文档", "配置", "部署", "接口", "知识库", "trace")):
+        return json.dumps(
+            {
+                "action": "retrieval.search",
+                "query": request.intent.rewrite_query or latest_user_message,
+                "reason": "问题依赖项目知识或配置细节，先检索再回答。",
+            },
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "action": "answer.direct",
+            "query": request.intent.rewrite_query or latest_user_message,
+            "reason": "问题可以直接回答，不需要额外检索。",
+        },
+        ensure_ascii=False,
+    )
+
+
+def _looks_like_planner_question(normalized_text: str) -> bool:
+    markers = ("对比", "比较", "差异", "统计", "汇总", "共同", "都", "分别", "同时", "并且", "也在", "排序", "分组", "去重")
+    hit_count = sum(1 for marker in markers if marker in normalized_text)
+    multi_entity = any(separator in normalized_text for separator in ("和", "与", "及", "、", "并且"))
+    return hit_count >= 2 or (multi_entity and hit_count >= 1)
+
+
+def _mock_planner_strategy(normalized_text: str) -> tuple[str, str]:
+    if any(marker in normalized_text for marker in ("排序", "排名", "最多", "最少")):
+        return "rank", "table"
+    if any(marker in normalized_text for marker in ("分组", "分别", "各自", "归类")):
+        return "group_by", "table"
+    if any(marker in normalized_text for marker in ("去重", "汇总", "合并")):
+        return "dedupe_union", "list"
+    if any(marker in normalized_text for marker in ("共同", "都", "交集", "同时", "并且", "也在")):
+        return "intersection", "list"
+    return "union", "summary"
+
+
+def _build_mock_subqueries(query: str) -> list[str]:
+    separators = ("和", "与", "及", "、", "并且")
+    for separator in separators:
+        if separator in query:
+            left, right = query.split(separator, 1)
+            left = left.strip(" ，,。；;：:")
+            right = right.strip(" ，,。；;：:")
+            if left and right:
+                return [left, right]
+    return [query]
+
+
+def _extract_mock_items_from_sources(sources: list[SourceChunk]) -> list[str]:
+    items: list[str] = []
+    for source in sources:
+        for token in ("九隂神功", "九阴真经", "降龙十八掌", "黯然销魂掌", "玉女剑法", "独孤九剑", "空明拳", "蛤蟆功"):
+            if token in source.content and token not in items:
+                items.append(token)
+    return items[:12]

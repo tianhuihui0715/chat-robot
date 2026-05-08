@@ -241,19 +241,23 @@ class TraceService:
         need_rag: bool,
         rewrite_query: str,
         rationale: str,
+        model_output_extra: dict[str, Any] | None = None,
     ) -> None:
+        model_output = {
+            "intent": intent,
+            "need_rag": need_rag,
+            "rewrite_query": rewrite_query,
+            "rationale": rationale,
+        }
+        if model_output_extra:
+            model_output.update(model_output_extra)
         record_id = self._store.create_intent_record(
             request_id=active_trace.request_id,
             input_text=input_text,
             intent=intent,
             need_rag=need_rag,
             rewrite_query=rewrite_query,
-            model_output={
-                "intent": intent,
-                "need_rag": need_rag,
-                "rewrite_query": rewrite_query,
-                "rationale": rationale,
-            },
+            model_output=model_output,
         )
         self._complete_step(
             active_step=active_step,
@@ -263,6 +267,7 @@ class TraceService:
                 "intent": intent,
                 "need_rag": need_rag,
                 "rewrite_query": rewrite_query,
+                **(model_output_extra or {}),
             },
         )
 
@@ -307,6 +312,18 @@ class TraceService:
             record_ref_type="generation_record",
             record_ref_id=record_id,
             outputs={"output": llm_output},
+        )
+
+    def complete_generic_step(
+        self,
+        active_step: ActiveStep,
+        outputs: dict[str, Any],
+    ) -> None:
+        self._complete_step(
+            active_step=active_step,
+            record_ref_type=None,
+            record_ref_id=None,
+            outputs=outputs,
         )
 
     def record_timing_step(

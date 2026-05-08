@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>本地对话控制台</title>
-    <link rel="stylesheet" href="/static/css/app.css?v=20260425-rerank-toggle1" />
+    <link rel="stylesheet" href="/static/css/app.css?v=20260428-plan-execute2" />
   </head>
   <body class="app-shell app-shell--admin">
     <div class="background-grid" aria-hidden="true"></div>
@@ -81,6 +81,12 @@
                   <input id="rerank-mode" type="checkbox" checked />
                   <span>启用重排</span>
                 </label>
+                <label class="stack-form__label" for="execution-strategy">执行策略</label>
+                <select id="execution-strategy" name="execution-strategy" aria-label="执行模式">
+                  <option value="off">关闭规划执行</option>
+                  <option value="auto" selected>自动判断</option>
+                  <option value="force">强制规划执行</option>
+                </select>
                 <span class="hint" id="chat-hint">当前模式：流式返回 /api/v1/chat/stream</span>
                 <button class="button button--primary" id="send-button" type="submit">发送请求</button>
               </div>
@@ -112,6 +118,10 @@
                 <dt>改写查询</dt>
                 <dd id="rewrite-query-value">-</dd>
               </div>
+              <div>
+                <dt>执行模式</dt>
+                <dd id="execution-mode-value">-</dd>
+              </div>
             </dl>
 
             <div class="detail-card">
@@ -127,6 +137,13 @@
             </div>
 
             <div class="detail-card">
+              <h3>计划与执行</h3>
+              <div class="mini-list" id="execution-list">
+                <div class="empty-state">当前还没有执行过程。</div>
+              </div>
+            </div>
+
+            <div class="detail-card">
               <div class="detail-card__title-row">
                 <h3>原始响应</h3>
                 <a class="text-link" id="trace-link" href="/admin/traces">在日志页查看</a>
@@ -138,6 +155,6 @@
       </main>
     </div>
 
-    <script src="/static/js/chat-console.js?v=20260425-rerank-toggle1" defer></script>
+    <script src="/static/js/chat-console.js?v=20260428-plan-execute3" defer></script>
   </body>
 </html>

@@ -1,0 +1,31 @@
+{
+  "name": "plan_execute_complex",
+  "description": "Complex multi-hop and aggregation-style questions for evaluating plan_execute routing, retrieval coverage, and aggregation quality.",
+  "cases": [
+    {
+      "query": "统计下有哪些武功是在射雕英雄传出现过并且也在神雕侠侣中也出现的",
+      "expected_sources": ["射雕英雄传", "神雕侠侣"],
+      "expected_answer_keywords": ["共同", "武功"]
+    },
+    {
+      "query": "对比下神雕侠侣和射雕英雄传哪部小说里出现的功夫更多",
+      "expected_sources": ["射雕英雄传", "神雕侠侣"],
+      "expected_answer_keywords": ["更多", "对比"]
+    },
+    {
+      "query": "分别总结 Docker Compose 部署和 Windows API-only 部署的差异，再说下各自容易踩的坑",
+      "expected_sources": ["README", "部署", "Windows"],
+      "expected_answer_keywords": ["差异", "坑"]
+    },
+    {
+      "query": "比较下这个项目里向量检索和 BM25 检索各自的作用，以及为什么最后还要做融合",
+      "expected_sources": ["Qdrant", "BM25", "hybrid"],
+      "expected_answer_keywords": ["融合", "检索"]
+    },
+    {
+      "query": "统计下默认知识库里哪些文档提到了 Qdrant，并说明它们分别在讲什么",
+      "expected_sources": ["Qdrant"],
+      "expected_answer_keywords": ["分别", "Qdrant"]
+    }
+  ]
+}

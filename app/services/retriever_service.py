@@ -74,6 +74,10 @@ class RetrieverService(Protocol):
         *,
         use_reranker: bool | None = None,
         knowledge_base_id: str | None = None,
+        top_k_override: int | None = None,
+        candidate_multiplier_override: int | None = None,
+        rerank_candidate_limit_override: int | None = None,
+        bm25_top_k_override: int | None = None,
     ) -> list[SourceChunk]:
         ...
 
@@ -95,6 +99,10 @@ class InMemoryRetrieverService:
         *,
         use_reranker: bool | None = None,
         knowledge_base_id: str | None = None,
+        top_k_override: int | None = None,
+        candidate_multiplier_override: int | None = None,
+        rerank_candidate_limit_override: int | None = None,
+        bm25_top_k_override: int | None = None,
     ) -> list[SourceChunk]:
         query_terms = self._tokenize(query)
         if not query_terms:
@@ -119,7 +127,7 @@ class InMemoryRetrieverService:
                 score=score,
                 metadata=record.metadata,
             )
-            for score, record in scored_records[: self._top_k]
+            for score, record in scored_records[: (top_k_override or self._top_k)]
         ]
 
     @staticmethod
@@ -153,12 +161,23 @@ class QdrantRetrieverService:
         *,
         use_reranker: bool | None = None,
         knowledge_base_id: str | None = None,
+        top_k_override: int | None = None,
+        candidate_multiplier_override: int | None = None,
+        rerank_candidate_limit_override: int | None = None,
+        bm25_top_k_override: int | None = None,
     ) -> list[SourceChunk]:
         normalized_query = query.strip()
         if not normalized_query:
             return []
+        top_k = top_k_override or self._top_k
+        candidate_multiplier = candidate_multiplier_override or self._candidate_multiplier
+        rerank_candidate_limit = rerank_candidate_limit_override or self._rerank_candidate_limit
         record_retrieval_query(normalized_query)
-        chunks = await self.retrieve_candidates(normalized_query, knowledge_base_id=knowledge_base_id)
+        chunks = await self.retrieve_candidates(
+            normalized_query,
+            limit=max(top_k, top_k * candidate_multiplier),
+            knowledge_base_id=knowledge_base_id,
+        )
         chunks = _coarse_deduplicate_candidates(chunks)
         record_retrieval_stage("coarse_deduped", chunks)
         if use_reranker is not False and self._reranker_provider is not None and chunks:
@@ -166,7 +185,7 @@ class QdrantRetrieverService:
                 normalized_query,
                 chunks,
                 self._reranker_provider,
-                max_candidates=self._rerank_candidate_limit,
+                max_candidates=rerank_candidate_limit,
                 min_score=self._score_threshold,
             )
         elif use_reranker is False:
@@ -177,8 +196,8 @@ class QdrantRetrieverService:
                 metadata={"min_score": self._score_threshold},
             )
         chunks = await self.post_process_sources(chunks)
-        record_retrieval_stage("final_sources", chunks[: self._top_k])
-        return chunks[: self._top_k]
+        record_retrieval_stage("final_sources", chunks[:top_k], metadata={"top_k": top_k})
+        return chunks[:top_k]
 
     async def retrieve_candidates(
         self,
@@ -368,12 +387,22 @@ class BM25RetrieverService:
         *,
         use_reranker: bool | None = None,
         knowledge_base_id: str | None = None,
+        top_k_override: int | None = None,
+        candidate_multiplier_override: int | None = None,
+        rerank_candidate_limit_override: int | None = None,
+        bm25_top_k_override: int | None = None,
     ) -> list[SourceChunk]:
         normalized_query = query.strip()
         if not normalized_query:
             return []
+        top_k = top_k_override or self._top_k
+        rerank_candidate_limit = rerank_candidate_limit_override or self._rerank_candidate_limit
         record_retrieval_query(normalized_query)
-        chunks = self.retrieve_candidates(normalized_query, knowledge_base_id=knowledge_base_id)
+        chunks = self.retrieve_candidates(
+            normalized_query,
+            limit=top_k,
+            knowledge_base_id=knowledge_base_id,
+        )
         chunks = _coarse_deduplicate_candidates(chunks)
         record_retrieval_stage("coarse_deduped", chunks)
         if use_reranker is False:
@@ -384,11 +413,11 @@ class BM25RetrieverService:
                 normalized_query,
                 chunks,
                 self._reranker_provider,
-                max_candidates=self._rerank_candidate_limit,
+                max_candidates=rerank_candidate_limit,
                 min_score=0.1,
             )
-        record_retrieval_stage("final_sources", chunks[: self._top_k])
-        return chunks[: self._top_k]
+        record_retrieval_stage("final_sources", chunks[:top_k], metadata={"top_k": top_k})
+        return chunks[:top_k]
 
     def retrieve_candidates(
         self,
@@ -498,34 +527,42 @@ class HybridRetrieverService:
         *,
         use_reranker: bool | None = None,
         knowledge_base_id: str | None = None,
+        top_k_override: int | None = None,
+        candidate_multiplier_override: int | None = None,
+        rerank_candidate_limit_override: int | None = None,
+        bm25_top_k_override: int | None = None,
     ) -> list[SourceChunk]:
         normalized_query = query.strip()
         if not normalized_query:
             return []
+        top_k = top_k_override or self._top_k
+        candidate_multiplier = candidate_multiplier_override or self._candidate_multiplier
+        rerank_candidate_limit = rerank_candidate_limit_override or self._rerank_candidate_limit
+        bm25_top_k = bm25_top_k_override or self._bm25_top_k
         record_retrieval_query(normalized_query)
         scoped_knowledge_base_id = _normalize_filter_knowledge_base_id(knowledge_base_id)
 
         if self._retrieval_mode == "dense":
             chunks = await self._dense_retriever.retrieve_candidates(
                 normalized_query,
-                limit=max(self._top_k, self._top_k * self._candidate_multiplier),
+                limit=max(top_k, top_k * candidate_multiplier),
                 knowledge_base_id=scoped_knowledge_base_id,
             )
         elif self._retrieval_mode == "bm25":
             chunks = self._bm25_retriever.retrieve_candidates(
                 normalized_query,
-                limit=max(self._top_k, self._bm25_top_k),
+                limit=max(top_k, bm25_top_k),
                 knowledge_base_id=scoped_knowledge_base_id,
             )
         else:
             dense_chunks = await self._dense_retriever.retrieve_candidates(
                 normalized_query,
-                limit=max(self._top_k, self._top_k * self._candidate_multiplier),
+                limit=max(top_k, top_k * candidate_multiplier),
                 knowledge_base_id=scoped_knowledge_base_id,
             )
             bm25_chunks = self._bm25_retriever.retrieve_candidates(
                 normalized_query,
-                limit=max(self._top_k, self._bm25_top_k),
+                limit=max(top_k, bm25_top_k),
                 knowledge_base_id=scoped_knowledge_base_id,
             )
             chunks = self._fuse_with_rrf(dense_chunks, bm25_chunks)
@@ -546,7 +583,7 @@ class HybridRetrieverService:
                 normalized_query,
                 chunks,
                 self._reranker_provider,
-                max_candidates=self._rerank_candidate_limit,
+                max_candidates=rerank_candidate_limit,
                 min_score=self._score_threshold,
             )
         elif self._retrieval_mode == "hybrid":
@@ -564,8 +601,12 @@ class HybridRetrieverService:
                 metadata={"min_score": self._score_threshold, "score_type": "bm25"},
             )
         chunks = await self._dense_retriever.post_process_sources(chunks)
-        record_retrieval_stage("final_sources", chunks[: self._top_k])
-        return chunks[: self._top_k]
+        record_retrieval_stage(
+            "final_sources",
+            chunks[:top_k],
+            metadata={"top_k": top_k, "bm25_top_k": bm25_top_k},
+        )
+        return chunks[:top_k]
 
     def _fuse_with_rrf(
         self,

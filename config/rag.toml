@@ -1,10 +1,16 @@
 [rag]
 top_k = 4
+plan_top_k = 8
 score_threshold = 0.1
+plan_candidate_multiplier = 4
 rerank_candidate_limit = 12
+plan_rerank_candidate_limit = 24
+plan_max_retries = 1
+plan_retry_multiplier = 2
 collection_name = "knowledge_chunks"
 retrieval_mode = "hybrid"
 bm25_top_k = 8
+plan_bm25_top_k = 16
 bm25_title_boost = 2.0
 rrf_k = 60
 rrf_min_score = 0.016

@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
 import asyncio
+import json
 
 from qdrant_client import QdrantClient
 
-from app.core.config import Settings
+from app.core.config import CONFIG_DIR, Settings
 from app.persistence.knowledge_ingest_store import KnowledgeIngestStore
 from app.persistence.trace_store import SQLTraceStore
 from app.schemas.admin import RAGCompareVariant, RAGEvaluationCase, RAGRuntimeConfig
@@ -24,6 +25,7 @@ from app.services.intent_service import (
 )
 from app.services.knowledge_base import InMemoryKnowledgeBase, KnowledgeBase, QdrantKnowledgeBase
 from app.services.knowledge_ingest_service import KnowledgeIngestService
+from app.services.planner_service import PlannerService
 from app.services.rag_lab_service import RAGLabService
 from app.services.rag_snapshot_service import RAGSnapshotService
 from app.services.retriever_service import (
@@ -35,6 +37,7 @@ from app.services.retriever_service import (
     RetrieverService,
 )
 from app.services.trace_service import LangSmithObserver, TraceService
+from app.services.tool_runtime import ToolRuntime, build_default_tool_runtime
 
 
 @dataclass
@@ -46,10 +49,13 @@ class ServiceContainer:
     intent_service: IntentService
     retriever_service: RetrieverService
     generation_service: QueuedGenerationService
+    planner_service: PlannerService
     trace_service: TraceService
+    tool_runtime: ToolRuntime
     rag_snapshot_service: RAGSnapshotService
     chat_pipeline: ChatPipeline
     rag_lab_service: RAGLabService
+    planner_generation_service: QueuedGenerationService | None = None
     embedder_provider: SentenceTransformerProvider | None = None
     reranker_provider: CrossEncoderProvider | None = None
     bm25_index_store: SQLiteBM25IndexStore | None = None
@@ -74,8 +80,12 @@ class ServiceContainer:
             await asyncio.to_thread(self.reranker_provider.preload)
         await self.intent_service.start()
         await self.generation_service.start()
+        if self.planner_generation_service is not None:
+            await self.planner_generation_service.start()
 
     async def stop(self) -> None:
+        if self.planner_generation_service is not None:
+            await self.planner_generation_service.stop()
         await self.generation_service.stop()
         await self.intent_service.stop()
         await self.knowledge_ingest_service.stop()
@@ -120,11 +130,17 @@ class ServiceContainer:
 
         return RAGRuntimeConfig(
             top_k=top_k,
+            plan_top_k=self.settings.rag_plan_top_k,
             score_threshold=score_threshold,
             candidate_multiplier=candidate_multiplier,
+            plan_candidate_multiplier=self.settings.rag_plan_candidate_multiplier,
             rerank_candidate_limit=rerank_candidate_limit,
+            plan_rerank_candidate_limit=self.settings.rag_plan_rerank_candidate_limit,
+            plan_max_retries=self.settings.rag_plan_max_retries,
+            plan_retry_multiplier=self.settings.rag_plan_retry_multiplier,
             retrieval_mode=retrieval_mode,
             bm25_top_k=bm25_top_k,
+            plan_bm25_top_k=self.settings.rag_plan_bm25_top_k,
             bm25_title_boost=bm25_title_boost,
             rrf_k=rrf_k,
             rrf_min_score=rrf_min_score,
@@ -138,11 +154,17 @@ class ServiceContainer:
         self,
         *,
         top_k: int,
+        plan_top_k: int,
         score_threshold: float,
         candidate_multiplier: int,
+        plan_candidate_multiplier: int,
         rerank_candidate_limit: int,
+        plan_rerank_candidate_limit: int,
+        plan_max_retries: int,
+        plan_retry_multiplier: int,
         retrieval_mode: RetrievalMode,
         bm25_top_k: int,
+        plan_bm25_top_k: int,
         bm25_title_boost: float,
         rrf_k: int,
         rrf_min_score: float,
@@ -152,10 +174,16 @@ class ServiceContainer:
         llm_temperature: float,
     ) -> RAGRuntimeConfig:
         self.settings.rag_top_k = top_k
+        self.settings.rag_plan_top_k = plan_top_k
         self.settings.rag_score_threshold = score_threshold
+        self.settings.rag_plan_candidate_multiplier = plan_candidate_multiplier
         self.settings.rag_rerank_candidate_limit = rerank_candidate_limit
+        self.settings.rag_plan_rerank_candidate_limit = plan_rerank_candidate_limit
+        self.settings.rag_plan_max_retries = plan_max_retries
+        self.settings.rag_plan_retry_multiplier = plan_retry_multiplier
         self.settings.rag_retrieval_mode = retrieval_mode
         self.settings.rag_bm25_top_k = bm25_top_k
+        self.settings.rag_plan_bm25_top_k = plan_bm25_top_k
         self.settings.rag_bm25_title_boost = bm25_title_boost
         self.settings.rag_rrf_k = rrf_k
         self.settings.rag_rrf_min_score = rrf_min_score
@@ -163,6 +191,14 @@ class ServiceContainer:
         self.settings.rag_chunk_overlap = chunk_overlap
         self.settings.llm_temperature = llm_temperature
         self.chat_pipeline.update_generation_temperature(llm_temperature)
+        self.chat_pipeline.update_plan_execute_runtime_config(
+            top_k=plan_top_k,
+            candidate_multiplier=plan_candidate_multiplier,
+            rerank_candidate_limit=plan_rerank_candidate_limit,
+            bm25_top_k=plan_bm25_top_k,
+            max_retries=plan_max_retries,
+            retry_multiplier=plan_retry_multiplier,
+        )
 
         if isinstance(self.retriever_service, QdrantRetrieverService):
             self.retriever_service.update_runtime_config(
@@ -193,6 +229,13 @@ class ServiceContainer:
                 chunk_overlap=chunk_overlap,
             )
         return self.get_rag_runtime_config()
+
+    def get_default_rag_evaluation_cases(self):
+        payload = json.loads((CONFIG_DIR / "rag_eval_cases.plan_execute.json").read_text(encoding="utf-8"))
+        return payload.get("name", "plan_execute_complex"), payload.get("description", ""), payload.get("cases", [])
+
+    def list_runtime_tools(self):
+        return self.tool_runtime.registry.list_tools()
 
     async def compare_rag_variants(self, query: str, variants: list[RAGCompareVariant], generate_answer: bool):
         from app.schemas.admin import RAGCompareResponse, RAGCompareResult
@@ -341,11 +384,17 @@ class ServiceContainer:
         current = self.get_rag_runtime_config()
         applied = self.update_rag_runtime_config(
             top_k=top_k,
+            plan_top_k=current.plan_top_k,
             score_threshold=current.score_threshold,
             candidate_multiplier=candidate_multiplier,
+            plan_candidate_multiplier=current.plan_candidate_multiplier,
             rerank_candidate_limit=variant.rerank_k or current.rerank_candidate_limit,
+            plan_rerank_candidate_limit=current.plan_rerank_candidate_limit,
+            plan_max_retries=current.plan_max_retries,
+            plan_retry_multiplier=current.plan_retry_multiplier,
             retrieval_mode=variant.retrieval_mode,
             bm25_top_k=variant.bm25_top_k,
+            plan_bm25_top_k=current.plan_bm25_top_k,
             bm25_title_boost=variant.bm25_title_boost,
             rrf_k=variant.rrf_k,
             rrf_min_score=current.rrf_min_score,
@@ -523,6 +572,11 @@ def build_service_container(settings: Settings) -> ServiceContainer:
         store=trace_store,
         observer=langsmith_observer,
     )
+    tool_runtime = build_default_tool_runtime(
+        retriever_service=retriever_service,
+        knowledge_base=knowledge_base,
+        trace_service=trace_service,
+    )
     rag_snapshot_service = RAGSnapshotService()
     if settings.runtime_mode == "remote_inference":
         intent_service: IntentService = RemoteIntentService(
@@ -542,6 +596,28 @@ def build_service_container(settings: Settings) -> ServiceContainer:
         backend=generation_backend,
         maxsize=settings.gpu_queue_maxsize,
     )
+    planner_generation_service: QueuedGenerationService | None = None
+    planner_service_backend = generation_service
+    planner_model_label = "shared_generation_backend"
+    planner_url = (settings.planner_inference_service_url or "").strip()
+    if planner_url:
+        planner_generation_service = QueuedGenerationService(
+            backend=RemoteGenerationBackend(
+                base_url=planner_url,
+                timeout_seconds=settings.planner_timeout_seconds,
+                max_new_tokens=settings.planner_max_new_tokens,
+            ),
+            maxsize=settings.gpu_queue_maxsize,
+        )
+        planner_service_backend = planner_generation_service
+        planner_model_label = planner_url
+
+    planner_service = PlannerService(
+        generation_service=planner_service_backend,
+        enabled=settings.planner_enabled,
+        max_new_tokens=settings.planner_max_new_tokens,
+        model_label=planner_model_label,
+    )
     knowledge_ingest_store = KnowledgeIngestStore(settings.trace_store_dsn)
     knowledge_ingest_service = KnowledgeIngestService(
         knowledge_base=knowledge_base,
@@ -552,9 +628,17 @@ def build_service_container(settings: Settings) -> ServiceContainer:
         knowledge_base=knowledge_base,
         retriever_service=retriever_service,
         generation_service=generation_service,
+        planner_service=planner_service,
         trace_service=trace_service,
+        tool_runtime=tool_runtime,
         rag_snapshot_service=rag_snapshot_service,
         generation_temperature=settings.llm_temperature,
+        plan_execute_top_k=settings.rag_plan_top_k,
+        plan_execute_candidate_multiplier=settings.rag_plan_candidate_multiplier,
+        plan_execute_rerank_candidate_limit=settings.rag_plan_rerank_candidate_limit,
+        plan_execute_bm25_top_k=settings.rag_plan_bm25_top_k,
+        plan_execute_max_retries=settings.rag_plan_max_retries,
+        plan_execute_retry_multiplier=settings.rag_plan_retry_multiplier,
     )
     rag_lab_service = RAGLabService(
         embedder_provider=embedder_provider,
@@ -569,10 +653,13 @@ def build_service_container(settings: Settings) -> ServiceContainer:
         intent_service=intent_service,
         retriever_service=retriever_service,
         generation_service=generation_service,
+        planner_service=planner_service,
         trace_service=trace_service,
+        tool_runtime=tool_runtime,
         rag_snapshot_service=rag_snapshot_service,
         chat_pipeline=chat_pipeline,
         rag_lab_service=rag_lab_service,
+        planner_generation_service=planner_generation_service,
         embedder_provider=embedder_provider,
         reranker_provider=reranker_provider,
         bm25_index_store=bm25_index_store,

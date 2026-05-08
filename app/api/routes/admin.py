@@ -11,9 +11,13 @@ from app.schemas.admin import (
     RAGCompareRequest,
     RAGCompareResponse,
     RAGEvaluationRequest,
+    RAGEvaluationPresetResponse,
     RAGEvaluationResponse,
     RAGRuntimeConfig,
     RAGRuntimeConfigUpdate,
+    RuntimeToolDefinitionResponse,
+    RuntimeToolListResponse,
+    RuntimeToolParameterResponse,
 )
 from app.services.document_parsing_service import parse_lab_document
 from app.services.container import ServiceContainer
@@ -35,11 +39,17 @@ async def update_rag_config(
 ) -> RAGRuntimeConfig:
     return container.update_rag_runtime_config(
         top_k=request.top_k,
+        plan_top_k=request.plan_top_k,
         score_threshold=request.score_threshold,
         candidate_multiplier=request.candidate_multiplier,
+        plan_candidate_multiplier=request.plan_candidate_multiplier,
         rerank_candidate_limit=request.rerank_candidate_limit,
+        plan_rerank_candidate_limit=request.plan_rerank_candidate_limit,
+        plan_max_retries=request.plan_max_retries,
+        plan_retry_multiplier=request.plan_retry_multiplier,
         retrieval_mode=request.retrieval_mode,
         bm25_top_k=request.bm25_top_k,
+        plan_bm25_top_k=request.plan_bm25_top_k,
         bm25_title_boost=request.bm25_title_boost,
         rrf_k=request.rrf_k,
         rrf_min_score=request.rrf_min_score,
@@ -72,6 +82,44 @@ async def evaluate_rag_variants(
         variants=request.variants,
         generate_answer=request.generate_answer,
     )
+
+
+@router.get("/rag/evaluate/default-cases", response_model=RAGEvaluationPresetResponse)
+async def get_default_rag_evaluation_cases(
+    container: ServiceContainer = Depends(get_container),
+) -> RAGEvaluationPresetResponse:
+    name, description, cases = container.get_default_rag_evaluation_cases()
+    return RAGEvaluationPresetResponse(
+        name=name,
+        description=description,
+        cases=cases,
+    )
+
+
+@router.get("/tools", response_model=RuntimeToolListResponse)
+async def list_runtime_tools(
+    container: ServiceContainer = Depends(get_container),
+) -> RuntimeToolListResponse:
+    items = []
+    for definition in container.list_runtime_tools():
+        items.append(
+            RuntimeToolDefinitionResponse(
+                name=definition.name,
+                description=definition.description,
+                enabled=definition.enabled,
+                exposed_to_planner=definition.exposed_to_planner,
+                parameters=[
+                    RuntimeToolParameterResponse(
+                        name=parameter.name,
+                        type=parameter.type,
+                        description=parameter.description,
+                        required=parameter.required,
+                    )
+                    for parameter in definition.parameters
+                ],
+            )
+        )
+    return RuntimeToolListResponse(items=items)
 
 
 @router.post("/rag/lab/run", response_model=RAGLabSessionResponse)

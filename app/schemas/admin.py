@@ -8,11 +8,17 @@ from app.schemas.traces import TraceDetail, TraceSummary
 
 class RAGRuntimeConfig(BaseModel):
     top_k: int = Field(ge=1, le=20)
+    plan_top_k: int = Field(default=8, ge=1, le=30)
     score_threshold: float = Field(ge=0.0, le=1.0)
     candidate_multiplier: int = Field(ge=1, le=10)
+    plan_candidate_multiplier: int = Field(default=4, ge=1, le=12)
     rerank_candidate_limit: int = Field(default=12, ge=1, le=50)
+    plan_rerank_candidate_limit: int = Field(default=24, ge=1, le=80)
+    plan_max_retries: int = Field(default=1, ge=0, le=4)
+    plan_retry_multiplier: int = Field(default=2, ge=1, le=4)
     retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
     bm25_top_k: int = Field(default=8, ge=1, le=50)
+    plan_bm25_top_k: int = Field(default=16, ge=1, le=80)
     bm25_title_boost: float = Field(default=2.0, ge=0.1, le=10.0)
     rrf_k: int = Field(default=60, ge=1, le=200)
     rrf_min_score: float = Field(default=0.016, ge=0.0, le=1.0)
@@ -25,11 +31,17 @@ class RAGRuntimeConfig(BaseModel):
 
 class RAGRuntimeConfigUpdate(BaseModel):
     top_k: int = Field(ge=1, le=20)
+    plan_top_k: int = Field(default=8, ge=1, le=30)
     score_threshold: float = Field(ge=0.0, le=1.0)
     candidate_multiplier: int = Field(ge=1, le=10)
+    plan_candidate_multiplier: int = Field(default=4, ge=1, le=12)
     rerank_candidate_limit: int = Field(default=12, ge=1, le=50)
+    plan_rerank_candidate_limit: int = Field(default=24, ge=1, le=80)
+    plan_max_retries: int = Field(default=1, ge=0, le=4)
+    plan_retry_multiplier: int = Field(default=2, ge=1, le=4)
     retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
     bm25_top_k: int = Field(default=8, ge=1, le=50)
+    plan_bm25_top_k: int = Field(default=16, ge=1, le=80)
     bm25_title_boost: float = Field(default=2.0, ge=0.1, le=10.0)
     rrf_k: int = Field(default=60, ge=1, le=200)
     rrf_min_score: float = Field(default=0.016, ge=0.0, le=1.0)
@@ -127,6 +139,31 @@ class RAGEvaluationRequest(BaseModel):
 class RAGEvaluationResponse(BaseModel):
     cases: list[RAGEvaluationCaseResult] = Field(default_factory=list)
     summaries: list[RAGEvaluationSummary] = Field(default_factory=list)
+
+
+class RAGEvaluationPresetResponse(BaseModel):
+    name: str
+    description: str
+    cases: list[RAGEvaluationCase] = Field(default_factory=list)
+
+
+class RuntimeToolParameterResponse(BaseModel):
+    name: str
+    type: str
+    description: str
+    required: bool = True
+
+
+class RuntimeToolDefinitionResponse(BaseModel):
+    name: str
+    description: str
+    enabled: bool = True
+    exposed_to_planner: bool = False
+    parameters: list[RuntimeToolParameterResponse] = Field(default_factory=list)
+
+
+class RuntimeToolListResponse(BaseModel):
+    items: list[RuntimeToolDefinitionResponse] = Field(default_factory=list)
 
 
 class RAGLabDocument(BaseModel):

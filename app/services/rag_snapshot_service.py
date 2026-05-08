@@ -32,6 +32,7 @@ class RAGSnapshotService:
             "user_query": user_query,
             "created_at": _utcnow(),
             "intent": None,
+            "planner": None,
             "retrieval": {
                 "query": None,
                 "stages": [],
@@ -73,6 +74,9 @@ class RAGSnapshotService:
 
     def update_intent(self, request_id: str, *, intent_payload: dict[str, Any]) -> None:
         self._update(request_id, ["intent"], intent_payload)
+
+    def update_planner(self, request_id: str, *, planner_payload: dict[str, Any]) -> None:
+        self._update(request_id, ["planner"], planner_payload)
 
     def update_retrieval_query(self, request_id: str, *, query: str) -> None:
         self._update(request_id, ["retrieval", "query"], query)

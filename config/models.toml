@@ -8,4 +8,5 @@ reranker_model_path = "/root/models/bge-reranker-v2-m3"
 [generation]
 llm_max_input_tokens = 8192
 llm_max_new_tokens = 512
+planner_max_new_tokens = 512
 gpu_queue_maxsize = 100
